@@ -5,6 +5,7 @@ import net.minecraftforge.srg2source.util.Util
 import net.minecraftforge.srg2source.util.io.ConfLogger
 import org.jetbrains.kotlin.cli.common.config.addKotlinSourceRoot
 import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoot
+import org.jetbrains.kotlin.psi.KtFile
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -72,8 +73,19 @@ class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
             val analyzedTree = parser.parse()
             analyzedTree.files.forEach {
                 val md5 = Util.md5(it.text, StandardCharsets.UTF_8)
-                val builder = RangeMapBuilder(this, it, md5)
-                KotlinWalker().visit(it)
+                val sourcePath = it.getSourcePath()
+
+                val builder = RangeMapBuilder(this, sourcePath, md5)
+
+                log("start Processing \"$sourcePath\" md5: $md5")
+
+                KotlinWalker(builder).visit(it)
+                val rangeMap = builder.build()
+                if (output != null) {
+                    rangeMap.write(output, true)
+                }
+                log("End processing \"$sourcePath\"")
+                log("")
             }
         } catch (e: Exception) {
             e.printStackTrace(errorLogger)
@@ -97,5 +109,9 @@ class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
 
     companion object {
         private var INSTANCE: KotlinRangeExtractor? = null
+        fun KtFile.getSourcePath(): String {
+            return if (packageFqName.isRoot) name
+            else "$packageName.$name"
+        }
     }
 }

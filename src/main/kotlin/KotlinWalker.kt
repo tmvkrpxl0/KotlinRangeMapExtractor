@@ -1,15 +1,11 @@
 import com.intellij.psi.PsiElement
 import net.minecraftforge.srg2source.range.RangeMapBuilder
-import org.jetbrains.kotlin.psi.KtBlockExpression
-import org.jetbrains.kotlin.psi.KtBreakExpression
-import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.psi.KtForExpression
-import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.psiUtil.startOffset
+import org.jetbrains.kotlin.util.isOrdinaryClass
 
 class KotlinWalker(private val builder: RangeMapBuilder) {
-    fun visit(element: KtBlockExpression) {
-        element.children.forEach { visit(it) }
-    }
+    fun visit(element: KtBlockExpression) = element.visitChildren()
 
     fun visit(element: KtBreakExpression) {
         println(element.text)
@@ -21,27 +17,52 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         return
     }
 
-    fun visit(element: KtNamedFunction) {
-        println(element.name)
-        println(element.contractDescription)
-        println(element.typeParameters)
-        println(element.valueParameters)
-        println(element.docComment)
-        println(element.modifierList)
-        println(element.typeReference)
-        println(element.receiverTypeReference)
-        element.children.forEach { visit(it) }
+    fun visit(element: KtPackageDirective) {
+        if (element.isRoot) return
+        builder.addPackageReference(element.startOffset, element.textLength, element.fqName.asString())
     }
 
-    fun visit(element: KtFile) {
-        element.children.forEach {
-            if (it is KtForExpression) visit(it)
-            if (it is KtBreakExpression) visit(it)
+    fun visit(element: KtNamedFunction) {
+        // TODO
+        element.visitChildren()
+    }
+
+    fun visit(element: KtClass) {
+        // Modifier: pubilc, private
+        // Type Parameter: Thing<Int, String> <- Int and String
+        require(element.fqName != null)
+        val parent = element.fqName!!.parent()
+        val innerName = if (parent.isRoot) "${element.name}.kt" else "${parent.asString().replace(".", "/")}/${element.name}"
+
+        when {
+            element.isInterface() -> builder.addInterfaceDeclaration(element.startOffset, element.textLength, innerName)
+            element.isOrdinaryClass -> builder.addClassDeclaration(element.startOffset, element.textLength, innerName)
+        }
+
+        if (element.isInterface() || element.isOrdinaryClass) {
+            element.modifierList?.children?.let { children ->
+                children.forEach { child ->
+                    visit(child)
+                }
+            }
         }
     }
 
-    fun visit(element: PsiElement) {
+    private fun PsiElement.visitChildren() {
+        children.forEach { visit(it) }
+    }
 
+    fun visit(element: PsiElement) {
+        element.children.forEach {
+            when (it) {
+                is KtNamedFunction -> visit(it)
+                is KtForExpression -> visit(it)
+                is KtBreakExpression -> visit(it)
+                is KtPackageDirective -> visit(it)
+                is KtBlockExpression -> visit(it)
+                is KtClass -> visit(it)
+            }
+        }
     }
 }
 /*
