@@ -1,3 +1,5 @@
+package p;
+
 public class JavaTest {
     public static void test() {
         for(int i = 0;i<100; i++) {

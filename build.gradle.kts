@@ -1,7 +1,7 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    kotlin("jvm") version "1.6.21"
+    kotlin("jvm") version "1.7.22"
 }
 
 group = "org.example"
@@ -14,7 +14,6 @@ repositories {
 
 dependencies {
     testImplementation(kotlin("test"))
-    implementation("io.github.spair:imgui-java-app:1.86.4")
     implementation(kotlin("compiler"))
     // implementation(files("Srg2Source-8.0.8-fatjar.jar"))
     implementation("net.minecraftforge:Srg2Source:8.0.8")
@@ -25,5 +24,5 @@ tasks.test {
 }
 
 tasks.withType<KotlinCompile> {
-    kotlinOptions.jvmTarget = "1.8"
+    kotlinOptions.jvmTarget = "17"
 }

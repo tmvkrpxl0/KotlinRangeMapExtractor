@@ -1,38 +1,47 @@
+import com.intellij.codeWithMe.getStackTrace
+import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiWhiteSpace
 import net.minecraftforge.srg2source.range.RangeMapBuilder
+import org.jetbrains.kotlin.kdoc.psi.api.KDoc
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
 import org.jetbrains.kotlin.util.isOrdinaryClass
+import java.util.*
 
 class KotlinWalker(private val builder: RangeMapBuilder) {
-    fun visit(element: KtBlockExpression) = element.visitChildren()
+    fun onBlock(element: KtBlockExpression) = element.visitChildren()
 
-    fun visit(element: KtBreakExpression) {
-        println(element.text)
+    fun onBreak() {
         return
     }
 
-    fun visit(element: KtForExpression) {
-        println(element.text)
+    fun onFor(element: KtForExpression) {
+        element.visitChildren()
         return
     }
 
-    fun visit(element: KtPackageDirective) {
+    fun onDoc(element: KDoc) {
+        element.visitChildren()
+    }
+
+    fun onPackage(element: KtPackageDirective) {
         if (element.isRoot) return
         builder.addPackageReference(element.startOffset, element.textLength, element.fqName.asString())
     }
 
-    fun visit(element: KtNamedFunction) {
-        // TODO
+    fun onNamedFunction(element: KtNamedFunction) {
         element.visitChildren()
     }
 
-    fun visit(element: KtClass) {
-        // Modifier: pubilc, private
+    fun onClass(element: KtClass) {
+        // Modifiers in java: sealed, [access modifiers], final, static, abstract, non-sealed
         // Type Parameter: Thing<Int, String> <- Int and String
-        require(element.fqName != null)
-        val parent = element.fqName!!.parent()
-        val innerName = if (parent.isRoot) "${element.name}.kt" else "${parent.asString().replace(".", "/")}/${element.name}"
+        // Internal name examples:
+        // com.tmvkrpxl0.Test -> com/tmvkrpxl0/Test
+        // com.tmvkrpxl0.Test.InnerClass -> com/tmvkrpxl0/Test$InnerClass
+
+        val innerName = internalName(element)
 
         when {
             element.isInterface() -> builder.addInterfaceDeclaration(element.startOffset, element.textLength, innerName)
@@ -40,31 +49,122 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         }
 
         if (element.isInterface() || element.isOrdinaryClass) {
-            element.modifierList?.children?.let { children ->
-                children.forEach { child ->
-                    visit(child)
-                }
-            }
+            element.modifierList?.let { visit(it) }
+
+            val identifier = element.nameIdentifier!!
+            builder.addClassReference(identifier.startOffset, identifier.textLength, identifier.text, innerName, false)
+
+            element.typeParameterList?.visitChildren(true)
+            element.getSuperTypeList()?.visitChildren(true)
+            element.body?.let { visit(it) }
         }
     }
 
-    private fun PsiElement.visitChildren() {
-        children.forEach { visit(it) }
+    fun onModifiers(modifiers: KtModifierList) {
+        modifiers.visitChildren(true)
+    }
+
+    // In original srg2source, BodyDeclaration is for everything that can have body
+    // subclass, functions, etc
+    fun onBody(body: KtClassBody) {
+        body.visitChildren(true)
+    }
+
+    // Visits children of each Type Parameter(seems to be always empty??), name, and type bounds
+    fun onTypeParameter(typeParameter: KtTypeParameter) {
+        typeParameter.visitChildren()
+    }
+
+    fun onImportList() {
+        return
+    }
+
+    fun onWhiteSpace() {
+        return
+    }
+
+    fun onString(element: KtStringTemplateExpression) {
+        element.visitChildren()
+    }
+
+    fun onFile(file: KtFile) {
+        file.visitChildren()
+    }
+
+    fun onVariable(element: KtVariableDeclaration) {
+        element.visitChildren()
+    }
+
+    fun onCall(element: KtCallElement) {
+        val methodOwner = element
+    }
+
+    fun onDotQualified(element: KtDotQualifiedExpression) {
+        element.visitChildren()
     }
 
     fun visit(element: PsiElement) {
-        element.children.forEach {
-            when (it) {
-                is KtNamedFunction -> visit(it)
-                is KtForExpression -> visit(it)
-                is KtBreakExpression -> visit(it)
-                is KtPackageDirective -> visit(it)
-                is KtBlockExpression -> visit(it)
-                is KtClass -> visit(it)
+        when (element) {
+            is KtNamedFunction -> onNamedFunction(element)
+            is KtForExpression -> onFor(element)
+            is KtBreakExpression -> onBreak()
+            is KtPackageDirective -> onPackage(element)
+            is KtBlockExpression -> onBlock(element)
+            is KtClass -> onClass(element)
+            is KtImportList -> onImportList()
+            is PsiWhiteSpace -> onWhiteSpace()
+            is KtFile -> onFile(element)
+            is KDoc -> onDoc(element)
+            is KtStringTemplateExpression -> onString(element)
+            is KtVariableDeclaration -> onVariable(element)
+            is KtModifierList -> onModifiers(element)
+            is KtClassBody -> onBody(element)
+            is KtCallElement -> onCall(element)
+            is KtDotQualifiedExpression -> onDotQualified(element)
+            else -> {
+                println("Unhandled type: $element")
             }
         }
     }
+
+    fun List<PsiElement>.visitAll(allowEmpty: Boolean = false) {
+        if (!allowEmpty && isEmpty()) {
+            println("EMPTY!")
+            println(getStackTrace())
+        }
+        forEach {
+            visit(it)
+        }
+    }
+
+    fun PsiElement.visitChildren(allowEmpty: Boolean = false) {
+        if (!allowEmpty && children.isEmpty()) {
+            println("EMPTY!")
+            println(getStackTrace())
+        }
+        children.forEach {
+            visit(it)
+        }
+    }
 }
+
+private fun internalName(element: KtClass): String {
+    val segments = LinkedList(element.fqName!!.pathSegments())
+    return if (element.isInner()) {
+        val last = segments.removeLast()
+        segments.joinToString(separator = "/") + "$" + last
+    } else {
+        segments.joinToString(separator = "/")
+    }
+}
+
+/*
+* KtFile
+*  KtPackageDirective
+*  KtImportList
+*  PsiWhiteSpace
+*  KtClass
+* */
 /*
         @Override public boolean visit(AnnotationTypeDeclaration       node) { return process(node); }
         @Override public boolean visit(AnnotationTypeMemberDeclaration node) { return true; }
@@ -76,7 +176,7 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         @Override public boolean visit(AssertStatement                 node) { return true; }
         @Override public boolean visit(Assignment                      node) { return true; }
         - @Override public boolean visit(Block                           node) { return true; }
-        @Override public boolean visit(BlockComment                    node) { return true; }
+        - @Override public boolean visit(BlockComment                    node) { return true; }
         @Override public boolean visit(BooleanLiteral                  node) { return true; }
         - @Override public boolean visit(BreakStatement                  node) { return process(node); }
         @Override public boolean visit(CaseDefaultExpression           node) { return true; }
@@ -92,7 +192,7 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         @Override public boolean visit(Dimension                       node) { return true; }
         @Override public boolean visit(DoStatement                     node) { return true; }
         @Override public boolean visit(EmptyStatement                  node) { return true; }
-        @Override public boolean visit(EnhancedForStatement            node) { return true; }
+        - @Override public boolean visit(EnhancedForStatement            node) { return true; } There is only one for in kotlin
         @Override public boolean visit(EnumConstantDeclaration         node) { return true; }
         @Override public boolean visit(EnumDeclaration                 node) { return process(node); }
         @Override public boolean visit(ExportsDirective                node) { return true; }
@@ -100,19 +200,19 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         @Override public boolean visit(ExpressionStatement             node) { return true; }
         @Override public boolean visit(FieldAccess                     node) { return true; }
         @Override public boolean visit(FieldDeclaration                node) { return true; }
-        @Override public boolean visit(ForStatement                    node) { return true; }
+        - @Override public boolean visit(ForStatement                    node) { return true; }
         @Override public boolean visit(GuardedPattern                  node) { return true; }
         @Override public boolean visit(IfStatement                     node) { return true; }
-        @Override public boolean visit(ImportDeclaration               node) { return process(node); }
+        - @Override public boolean visit(ImportDeclaration               node) { return process(node); }
         @Override public boolean visit(InfixExpression                 node) { return true; }
         @Override public boolean visit(Initializer                     node) { return process(node); }
         @Override public boolean visit(InstanceofExpression            node) { return true; }
         @Override public boolean visit(PatternInstanceofExpression     node) { return true; }
         @Override public boolean visit(IntersectionType                node) { return true; }
-        @Override public boolean visit(Javadoc                         node) { return true; }
+        - @Override public boolean visit(Javadoc                         node) { return true; }
         @Override public boolean visit(LabeledStatement                node) { return process(node); }
         @Override public boolean visit(LambdaExpression                node) { return process(node); }
-        @Override public boolean visit(LineComment                     node) { return true; }
+        - @Override public boolean visit(LineComment                     node) { return true; }
         @Override public boolean visit(MarkerAnnotation                node) { return process(node); }
         @Override public boolean visit(MethodDeclaration               node) { return process(node); }
         @Override public boolean visit(MethodInvocation                node) { return true; }
@@ -146,7 +246,7 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         @Override public boolean visit(SimpleType                      node) { return true; }
         @Override public boolean visit(SingleMemberAnnotation          node) { return process(node); }
         @Override public boolean visit(SingleVariableDeclaration       node) { return process(node); }
-        @Override public boolean visit(StringLiteral                   node) { return true; }
+        - @Override public boolean visit(StringLiteral                   node) { return true; }
         @Override public boolean visit(SuperConstructorInvocation      node) { return true; }
         @Override public boolean visit(SuperFieldAccess                node) { return true; }
         @Override public boolean visit(SuperMethodInvocation           node) { return true; }

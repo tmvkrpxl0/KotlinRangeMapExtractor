@@ -5,8 +5,8 @@ class RunOriginal {
     @Test
     fun runOriginal() {
         RangeExtractMain.main(arrayOf(
-            "--in", "src/main/java",
-            "--out", "src/test/resources/output"
+            "--in", "src/main/java", // MUST BE PACKAGE ROOT!
+            "--out", "output"
         ))
     }
 }

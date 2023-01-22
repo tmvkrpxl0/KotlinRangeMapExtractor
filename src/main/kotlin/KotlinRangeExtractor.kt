@@ -1,26 +1,22 @@
-import net.minecraftforge.srg2source.api.InputSupplier
 import net.minecraftforge.srg2source.range.RangeMap
 import net.minecraftforge.srg2source.range.RangeMapBuilder
 import net.minecraftforge.srg2source.util.Util
 import net.minecraftforge.srg2source.util.io.ConfLogger
-import org.jetbrains.kotlin.cli.common.config.addKotlinSourceRoot
-import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoot
 import org.jetbrains.kotlin.psi.KtFile
 import java.io.File
-import java.io.IOException
 import java.io.InputStream
 import java.io.PrintWriter
 import java.nio.charset.StandardCharsets
 
-class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
-    var output: PrintWriter? = null
-    val libs: MutableSet<File> = LinkedHashSet()
-    var input: InputSupplier? = null
-    var fileCache: Map<String, RangeMap> = HashMap()
+class KotlinRangeExtractor(
+    private val root: String,
+    var output: PrintWriter? = null,
+    val logWarnings: Boolean = false,
+) : ConfLogger<KotlinRangeExtractor>() {
+    private val libs: MutableSet<File> = LinkedHashSet()
+    private val fileCache: MutableMap<String, RangeMap> = HashMap() // Relative Path from package root -> RangeMap
     var cacheHits = 0
         private set
-    var logWarnings = false
-    var enablePreview = false
 
     fun addLibrary(value: File) {
         val fileName = value.path.lowercase()
@@ -33,9 +29,8 @@ class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
         } else log("Unsupposrted library path: " + value.absolutePath)
     }
 
-    @Throws(IOException::class)
-    fun loadCache(stream: InputStream?) {
-        fileCache = RangeMap.readAll(stream)
+    fun addCache(stream: InputStream?) {
+        fileCache.putAll(RangeMap.readAll(stream))
     }
 
     //Log everything as a comment in case we merge the output and log as we used to do.
@@ -48,27 +43,12 @@ class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
      */
     fun run(): Boolean {
         log("Symbol range map extraction starting")
-        val files = input!!.gatherAll(".kt")
-            .map { f: String -> f.replace("\\\\".toRegex(), "/") } // Normalize directory separators.
-            .sorted()
-            .toTypedArray()
-        log("Processing " + files.size + " files")
-        if (files.isEmpty()) {
-            // no files? well.. nothing to do then.
-            cleanup()
-            return true
-        }
-        return legacyGenerate(files)
+        return generate(root)
     }
 
-    private fun legacyGenerate(files: Array<String>): Boolean {
+    private fun generate(root: String): Boolean {
         try {
-            val parser = KotlinParser()
-            libs.forEach {
-                parser.configuration.addJvmClasspathRoot(it)
-            }
-
-            files.forEach { parser.configuration.addKotlinSourceRoot(it) }
+            val parser = KotlinParser(logger, logWarnings, libs.toList(), root)
 
             val analyzedTree = parser.parse()
             analyzedTree.files.forEach {
@@ -76,6 +56,8 @@ class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
                 val sourcePath = it.getSourcePath()
 
                 val builder = RangeMapBuilder(this, sourcePath, md5)
+
+                // TODO Implement caching
 
                 log("start Processing \"$sourcePath\" md5: $md5")
 
@@ -95,11 +77,6 @@ class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
     }
 
     private fun cleanup() {
-        try {
-            input!!.close()
-        } catch (e: IOException) {
-            e.printStackTrace(errorLogger)
-        }
         if (output != null) {
             output!!.flush()
             output!!.close()
@@ -107,11 +84,8 @@ class KotlinRangeExtractor : ConfLogger<KotlinRangeExtractor>() {
         }
     }
 
-    companion object {
-        private var INSTANCE: KotlinRangeExtractor? = null
-        fun KtFile.getSourcePath(): String {
-            return if (packageFqName.isRoot) name
-            else "$packageName.$name"
-        }
+    fun KtFile.getSourcePath(): String {
+        return if (packageFqName.isRoot) name
+        else "$packageName.$name"
     }
 }
