@@ -1,16 +1,31 @@
 import com.intellij.codeWithMe.getStackTrace
-import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiWhiteSpace
 import net.minecraftforge.srg2source.range.RangeMapBuilder
+import org.jetbrains.kotlin.backend.common.serialization.mangle.ir.isAnonymous
+import org.jetbrains.kotlin.cfg.containingDeclarationForPseudocode
+import org.jetbrains.kotlin.cfg.getDeclarationDescriptorIncludingConstructors
+import org.jetbrains.kotlin.descriptors.FunctionDescriptor
+import org.jetbrains.kotlin.descriptors.VariableDescriptor
+import org.jetbrains.kotlin.js.descriptorUtils.getJetTypeFqName
 import org.jetbrains.kotlin.kdoc.psi.api.KDoc
+import org.jetbrains.kotlin.load.kotlin.computeJvmDescriptor
 import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
+import org.jetbrains.kotlin.psi.psiUtil.isTopLevelKtOrJavaMember
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
+import org.jetbrains.kotlin.resolve.BindingContext
+import org.jetbrains.kotlin.resolve.calls.util.getCall
+import org.jetbrains.kotlin.types.KotlinType
+import org.jetbrains.kotlin.types.isError
 import org.jetbrains.kotlin.util.isOrdinaryClass
 import java.util.*
 
-class KotlinWalker(private val builder: RangeMapBuilder) {
-    fun onBlock(element: KtBlockExpression) = element.visitChildren()
+// TODO Figure out how to resolve origin of givin element
+class KotlinWalker(private val builder: RangeMapBuilder, private val bindingContext: BindingContext) {
+    fun onBlock(element: KtBlockExpression) {
+        element.visitChildren()
+    }
 
     fun onBreak() {
         return
@@ -30,8 +45,22 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         builder.addPackageReference(element.startOffset, element.textLength, element.fqName.asString())
     }
 
+    /**
+     * Called when new function with "fun" keyword is being defined.
+     */
     fun onNamedFunction(element: KtNamedFunction) {
         element.visitChildren()
+    }
+
+    // Huh, valueParameters returns empty list when lambda has "it" as parameter
+    // This will be an issue....
+    fun onLambda(element: KtLambdaExpression) {
+        val name = element
+        // TODO Add declaration
+        // builder.addMethodDeclaration(element.startOffset, element.textLength, )
+
+        element.valueParameters.visitAll(false)
+        visit(element.bodyExpression!!) // why is this nullable?
     }
 
     fun onClass(element: KtClass) {
@@ -41,7 +70,7 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         // com.tmvkrpxl0.Test -> com/tmvkrpxl0/Test
         // com.tmvkrpxl0.Test.InnerClass -> com/tmvkrpxl0/Test$InnerClass
 
-        val innerName = internalName(element)
+        val innerName = internalClassName(element)
 
         when {
             element.isInterface() -> builder.addInterfaceDeclaration(element.startOffset, element.textLength, innerName)
@@ -60,6 +89,9 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         }
     }
 
+    /**
+     * Called when there is modifier such as visibility modifiers, inner keyword
+     */
     fun onModifiers(modifiers: KtModifierList) {
         modifiers.visitChildren(true)
     }
@@ -75,31 +107,130 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
         typeParameter.visitChildren()
     }
 
+    /**
+     * Called when there is import. Ignored in original range map extractor
+     */
     fun onImportList() {
         return
     }
 
+    /**
+     * Called when there is white space such as new line, space, tab, etc...
+     */
     fun onWhiteSpace() {
         return
     }
 
-    fun onString(element: KtStringTemplateExpression) {
-        element.visitChildren()
+    /**
+     * Called when there is any kind of String, either multiline or not.
+     * This does not include char with ', it must be "
+     */
+    fun onString() {
+        return
     }
 
+    /**
+     * Called when it starts compiling a file, kind of like entry point of compilation.
+     */
     fun onFile(file: KtFile) {
         file.visitChildren()
     }
 
+    /**
+     * Called when there is field declaration, either var or val of any kind.
+     * This includes extension property and destructing, etc...
+     * This excludes constructor parameter.
+     * There's another interface called `KtValVarKeywordOwner` which can be useful for above purpose.
+     * If it's extension variable, for now let's just convert "Class.varName" to "Class$varName"
+     * I... really don't think anyone using kotlin would legit use $
+     */
     fun onVariable(element: KtVariableDeclaration) {
+        val isField = element is KtDestructuringDeclarationEntry ||
+                element.isTopLevelKtOrJavaMember() ||
+                (element as KtProperty).isMember
+
+
+        if (!isField) {
+            if (localVariableTracker.isEmpty()) localVariableTracker.push(LinkedList())
+            val localVars = localVariableTracker.peek()
+
+            val variableDescriptor: VariableDescriptor =
+                element.getDeclarationDescriptorIncludingConstructors(bindingContext)
+                        as VariableDescriptor // I'm unsure if this case is safe
+            localVars += variableDescriptor
+
+            val method = element.containingDeclarationForPseudocode!!
+
+            val classOrFileName = element.containingClassOrObject?.let { internalClassName(it) }
+                ?: internalFileName(element.containingKtFile)
+
+            if ((method as KtNamed).nameAsName!!.isAnonymous) {
+                println("TODO: Implement lambda name resolver")
+            } else {
+                val enclosingDescriptor = method.getDeclarationDescriptorIncludingConstructors(bindingContext)
+                        as FunctionDescriptor
+
+                require(!variableDescriptor.type.isError)
+
+                builder.addLocalVariableReference(
+                    element.startOffset,
+                    element.textLength,
+                    element.name!!,
+                    classOrFileName,
+                    method.name,
+                    enclosingDescriptor.computeJvmDescriptor(),
+                    localVars.lastIndex,
+                    getTypeSignature(variableDescriptor.type),
+                    //element.typeReference!!.name!! // Type was Ljava/util/function/Consumer; or I in the test
+                )
+            }
+        } else {
+
+        }
+        println("On variable enclosing element: ${element.parent}")
         element.visitChildren()
     }
 
-    fun onCall(element: KtCallElement) {
-        val methodOwner = element
+    fun onDestructing(element: KtDestructuringDeclaration) {
+        element.visitChildren()
     }
 
+    /**
+     * Called when there is function call. element itself is only about method name, and it has no field/class name.
+     * There are 4 types of this<br>
+     *
+     * * KtAnnotationEntry -> when there is annotation on an element. this excludes file annotation.
+     * * KtCallExpression -> when there is function invocation.
+     * * KtConstructorDelegationCall -> in `Class Child: Super(1)`, `Super(1)` part is the supplied element.
+     * * KtSuperTypeCallEntry -> TODO! currently unknown
+     */
+    fun onCall(element: KtCallElement) {
+        // TODO figure out how to get origin of callee expression
+        element.calleeExpression!!.getCall(bindingContext)
+        val owner = element.calleeExpression!!
+    }
+
+    /**
+     * Called when there is expression with dots, such as `Class.forName`
+     * This also includes field access, both static and non-static
+     * However this does not include extension functions declaration.
+     */
     fun onDotQualified(element: KtDotQualifiedExpression) {
+        element.visitChildren()
+    }
+
+    /**
+     * Called when there is:
+     * * Condition, such as ==, >=
+     * * Loop range
+     * * Label qualifier, such as `break@forEach`
+     * * Indicies, TODO figure out this
+     * ----------------------------------
+     * * If
+     * * Else
+     * * Body of If statement, for If, Else-If, Else
+     */
+    fun onSpecial(element: KtContainerNode) {
         element.visitChildren()
     }
 
@@ -115,12 +246,15 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
             is PsiWhiteSpace -> onWhiteSpace()
             is KtFile -> onFile(element)
             is KDoc -> onDoc(element)
-            is KtStringTemplateExpression -> onString(element)
+            is KtStringTemplateExpression -> onString()
             is KtVariableDeclaration -> onVariable(element)
             is KtModifierList -> onModifiers(element)
             is KtClassBody -> onBody(element)
             is KtCallElement -> onCall(element)
             is KtDotQualifiedExpression -> onDotQualified(element)
+            is KtDestructuringDeclaration -> onDestructing(element)
+            is KtLambdaExpression -> onLambda(element)
+            is KtContainerNode -> onSpecial(element)
             else -> {
                 println("Unhandled type: $element")
             }
@@ -146,11 +280,18 @@ class KotlinWalker(private val builder: RangeMapBuilder) {
             visit(it)
         }
     }
+
+    private val localVariableTracker = Stack<MutableList<VariableDescriptor>>()
 }
 
-private fun internalName(element: KtClass): String {
+private fun internalFileName(element: KtFile): String {
+    return element.packageFqName.pathSegments().joinToString(separator = "/") + "/${element.name}"
+}
+private fun internalClassName(element: KtClassOrObject): String {
     val segments = LinkedList(element.fqName!!.pathSegments())
-    return if (element.isInner()) {
+    val isInner = element is KtClass && element.isInner()
+
+    return if (isInner) {
         val last = segments.removeLast()
         segments.joinToString(separator = "/") + "$" + last
     } else {
@@ -158,13 +299,38 @@ private fun internalName(element: KtClass): String {
     }
 }
 
-/*
-* KtFile
-*  KtPackageDirective
-*  KtImportList
-*  PsiWhiteSpace
-*  KtClass
-* */
+// Get the full binary name, including L; wrappers around class names
+fun getTypeSignature(type: KotlinType): String {
+    return "L${type.getJetTypeFqName(false).replace('.', '/')};"
+}
+
+// Notes on how original srg2source handles variables:
+// Both Eclipse compiler's and Kotlin compiler's variable declaration is composed of 2 parts:
+// Variable declaration and Name
+// Original srg2source works by saving variable in a map on "Variable declaration"
+// and write it into range map on "Name", by dynamically analyzing what kind of name it is
+// I think I can instead write it into range map on "Variable declaration"?
+// Also, srg2source treats local variable declaration and reference as same thing
+// and static and non-static variable as same thing
+
+// There is a class called StructuralEntry. It adds indent, "# START", and "# END" to output range file.
+// StructureEntry defines what can be StructureEntry, it's things like method, class, etc...
+// I was thinking of somehow using that system to define property function of val/var
+// But it seems impossible
+
+/**
+ * KtFile
+ *  KtPackageDirective
+ *  KtImportList
+ *  PsiWhiteSpace
+ *  KtClass
+ * */
+
+/**
+ * FOR
+ * BODY
+ * BLOCK
+ */
 /*
         @Override public boolean visit(AnnotationTypeDeclaration       node) { return process(node); }
         @Override public boolean visit(AnnotationTypeMemberDeclaration node) { return true; }

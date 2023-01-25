@@ -15,7 +15,6 @@ repositories {
 dependencies {
     testImplementation(kotlin("test"))
     implementation(kotlin("compiler"))
-    // implementation(files("Srg2Source-8.0.8-fatjar.jar"))
     implementation("net.minecraftforge:Srg2Source:8.0.8")
 }
 

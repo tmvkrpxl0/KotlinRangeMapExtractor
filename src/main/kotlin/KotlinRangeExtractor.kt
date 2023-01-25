@@ -2,7 +2,11 @@ import net.minecraftforge.srg2source.range.RangeMap
 import net.minecraftforge.srg2source.range.RangeMapBuilder
 import net.minecraftforge.srg2source.util.Util
 import net.minecraftforge.srg2source.util.io.ConfLogger
+import org.jetbrains.kotlin.container.get
 import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.resolve.BindingTrace
+import org.jetbrains.kotlin.resolve.LazyTopDownAnalyzer
+import org.jetbrains.kotlin.resolve.TopDownAnalysisMode
 import java.io.File
 import java.io.InputStream
 import java.io.PrintWriter
@@ -50,8 +54,12 @@ class KotlinRangeExtractor(
         try {
             val parser = KotlinParser(logger, logWarnings, libs.toList(), root)
 
-            val analyzedTree = parser.parse()
-            analyzedTree.files.forEach {
+            val (resolver, files) = parser.getResolverAndFiles()
+
+            val bindingContext = resolver.componentProvider.get<BindingTrace>().bindingContext
+            val analyzer = resolver.componentProvider.get<LazyTopDownAnalyzer>()
+            val result = analyzer.analyzeDeclarations(TopDownAnalysisMode.TopLevelDeclarations, files)
+            result.files.forEach {
                 val md5 = Util.md5(it.text, StandardCharsets.UTF_8)
                 val sourcePath = it.getSourcePath()
 
@@ -61,7 +69,7 @@ class KotlinRangeExtractor(
 
                 log("start Processing \"$sourcePath\" md5: $md5")
 
-                KotlinWalker(builder).visit(it)
+                KotlinWalker(builder, bindingContext).visit(it)
                 val rangeMap = builder.build()
                 if (output != null) {
                     rangeMap.write(output, true)

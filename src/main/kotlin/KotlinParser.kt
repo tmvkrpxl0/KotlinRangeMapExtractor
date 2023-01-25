@@ -1,31 +1,32 @@
 import com.intellij.openapi.util.Disposer
 import com.intellij.psi.search.GlobalSearchScope
 import org.jetbrains.kotlin.analyzer.ModuleInfo
+import org.jetbrains.kotlin.analyzer.ResolverForModule
 import org.jetbrains.kotlin.analyzer.ResolverForSingleModuleProject
 import org.jetbrains.kotlin.analyzer.common.CommonAnalysisParameters
 import org.jetbrains.kotlin.analyzer.common.CommonPlatformAnalyzerServices
 import org.jetbrains.kotlin.analyzer.common.CommonResolverForModuleFactory
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
+import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
 import org.jetbrains.kotlin.cli.common.config.addKotlinSourceRoot
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.FilteringMessageCollector
 import org.jetbrains.kotlin.cli.common.messages.MessageRenderer
 import org.jetbrains.kotlin.cli.common.messages.PrintingMessageCollector
+import org.jetbrains.kotlin.cli.common.setupCommonArguments
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
-import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoot
 import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoots
 import org.jetbrains.kotlin.cli.jvm.config.configureJdkClasspathRoots
 import org.jetbrains.kotlin.config.CompilerConfiguration
-import org.jetbrains.kotlin.config.LanguageFeature
-import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.config.languageVersionSettings
-import org.jetbrains.kotlin.container.tryGetService
 import org.jetbrains.kotlin.context.ProjectContext
 import org.jetbrains.kotlin.descriptors.ModuleCapability
+import org.jetbrains.kotlin.metadata.jvm.deserialization.JvmMetadataVersion
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.CommonPlatforms
 import org.jetbrains.kotlin.platform.TargetPlatform
+import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.resolve.*
 import java.io.File
 import java.io.PrintStream
@@ -44,12 +45,16 @@ class KotlinParser(
 
     val configuration = CompilerConfiguration().apply {
         put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, messageCollector)
+        val arguments = K2JVMCompilerArguments()
+        arguments.verbose = true
+        setupCommonArguments(arguments) { JvmMetadataVersion(*it) }
+
         configureJdkClasspathRoots()
         addJvmClasspathRoots(classPaths)
         addKotlinSourceRoot(kotlinRoot)
     }
 
-    fun parse(): TopDownAnalysisContext {
+    fun getResolverAndFiles(): Pair<ResolverForModule, List<KtFile>> {
         val rootDisposable = Disposer.newDisposable()
         try {
             val environment = KotlinCoreEnvironment.createForProduction(
@@ -57,6 +62,7 @@ class KotlinParser(
                 configuration,
                 EnvironmentConfigFiles.JVM_CONFIG_FILES
             )
+
             val ktFiles = environment.getSourceFiles()
 
             val moduleInfo = SourceModuleInfo(Name.special("<main"), mapOf(), false)
@@ -81,10 +87,8 @@ class KotlinParser(
                 syntheticFiles = ktFiles
             )
 
-            val container = resolver.resolverForModule(moduleInfo).componentProvider
-
-            val lazyTopDownAnalyzer = container.tryGetService(LazyTopDownAnalyzer::class.java) as LazyTopDownAnalyzer
-            return lazyTopDownAnalyzer.analyzeDeclarations(TopDownAnalysisMode.TopLevelDeclarations, ktFiles)
+            // There are multiple interesting services, I might need to look into this...
+            return resolver.resolverForModule(moduleInfo) to ktFiles
         } finally {
             rootDisposable.dispose()
             if (messageCollector.hasErrors()) {
