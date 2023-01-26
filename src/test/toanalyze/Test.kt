@@ -1,6 +1,8 @@
 @file:JvmName("Test")
 package test
 
+import java.io.File
+import java.net.http.HttpClient
 import java.util.function.Consumer
 import java.util.function.Function
 
@@ -15,14 +17,18 @@ val a = """
     $ref
 """.trimIndent()
 
+val test1: File = File("a")
+val test2: File = java.io.File("a")
+
 class ByTest: CharSequence by String.toString()
 
-val lambda: (Int) -> Unit = { i ->
-    val t = 1
+var lambda: (Int) -> Unit = { i ->
+    val t = File("a")
+    val u = java.io.File("a")
 }
 
 fun lambda(i: Int): Unit {
-    // val a: IntArray = IntArray(1) {0}
+    val a: IntArray = IntArray(1) {0}
 }
 fun <T> genericTest() {
     val a: (T) -> T = {

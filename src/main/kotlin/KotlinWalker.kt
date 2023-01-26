@@ -1,37 +1,25 @@
-import com.intellij.codeWithMe.getStackTrace
-import com.intellij.psi.*
-import com.intellij.psi.impl.source.tree.LeafPsiElement
 import net.minecraftforge.srg2source.range.RangeMapBuilder
 import org.jetbrains.kotlin.analyzer.ResolverForModule
 import org.jetbrains.kotlin.backend.common.serialization.mangle.ir.isAnonymous
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
-import org.jetbrains.kotlin.builtins.isSuspendFunctionType
 import org.jetbrains.kotlin.cfg.containingDeclarationForPseudocode
-import org.jetbrains.kotlin.cfg.getDeclarationDescriptorIncludingConstructors
+import org.jetbrains.kotlin.com.intellij.psi.PsiElement
+import org.jetbrains.kotlin.com.intellij.psi.PsiFile
+import org.jetbrains.kotlin.com.intellij.psi.PsiWhiteSpace
+import org.jetbrains.kotlin.com.intellij.psi.impl.source.tree.LeafPsiElement
 import org.jetbrains.kotlin.container.get
-import org.jetbrains.kotlin.descriptors.CallableMemberDescriptor
-import org.jetbrains.kotlin.descriptors.FunctionDescriptor
-import org.jetbrains.kotlin.descriptors.impl.AnonymousFunctionDescriptor
 import org.jetbrains.kotlin.js.descriptorUtils.getJetTypeFqName
 import org.jetbrains.kotlin.kdoc.psi.api.KDocElement
-import org.jetbrains.kotlin.load.kotlin.computeJvmDescriptor
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
-import org.jetbrains.kotlin.psi.psiUtil.getAnnotationEntries
 import org.jetbrains.kotlin.psi.psiUtil.isTopLevelKtOrJavaMember
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
 import org.jetbrains.kotlin.resolve.*
-import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowInfo
+import org.jetbrains.kotlin.resolve.bindingContextUtil.getAbbreviatedTypeOrType
 import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowValueFactory
-import org.jetbrains.kotlin.resolve.calls.util.getResolvedCall
-import org.jetbrains.kotlin.resolve.jvm.JvmBindingContextSlices
 import org.jetbrains.kotlin.resolve.lazy.LazyDeclarationResolver
 import org.jetbrains.kotlin.resolve.lazy.LocalDescriptorResolver
 import org.jetbrains.kotlin.resolve.lazy.ResolveSession
-import org.jetbrains.kotlin.resolve.scopes.ScopeUtils
-import org.jetbrains.kotlin.resolve.source.toSourceElement
-import org.jetbrains.kotlin.types.KotlinType
-import org.jetbrains.kotlin.types.TypeUtils.NO_EXPECTED_TYPE
 import org.jetbrains.kotlin.types.checker.KotlinTypeChecker
 import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
 import org.jetbrains.kotlin.types.expressions.ExpressionTypingVisitor
@@ -63,8 +51,6 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
 
 
     override fun visitBreakExpression(expression: KtBreakExpression) {
-        println("Break: ${expression.children}")
-
         handled = true
         return super.visitBreakExpression(expression)
     }
@@ -78,8 +64,6 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
     override fun visitLambdaExpression(lambda: KtLambdaExpression) {
         val name = "lambda${Random.nextInt(0..9999)}"
         lambdaNames[lambda] = name
-
-        // val descriptor = functions.resolveFunctionExpressionDescriptor()
 
         // builder.addMethodDeclaration(lambda.startOffset, lambda.textLength, name)
 
@@ -156,25 +140,7 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
         localVars += variable
 
         val method = variable.containingDeclarationForPseudocode as KtFunction
-
-        val scope = bindingTrace.bindingContext.get(BindingContext.LEXICAL_SCOPE, method)!!
-
-        types.resolveType(scope, method.typeReference!!, bindingTrace, true)
-        when(method) {
-            is KtNamedFunction -> {
-                functions.resolveFunctionDescriptor(scope.ownerDescriptor, scope, method, bindingTrace, DataFlowInfo.EMPTY, null)
-            }
-            is KtFunctionLiteral -> {
-                val descriptor = AnonymousFunctionDescriptor(
-                    scope.ownerDescriptor,
-                    annotations.resolveAnnotationsWithArguments(scope, method.getAnnotationEntries(), bindingTrace),
-                    CallableMemberDescriptor.Kind.DECLARATION, method.toSourceElement(),
-                    NO_EXPECTED_TYPE.isSuspendFunctionType
-                )
-            }
-            else -> throw IllegalStateException("Unable to determine type of a method")
-        }
-        val methodDescription = method.getDeclarationDescriptorIncludingConstructors(bindingTrace.bindingContext) as FunctionDescriptor
+        val methodDescriptor = functionDescriptor(method)
 
         val classOrFileName = variable.containingClassOrObject?.let { internalClassName(it) }
             ?: internalFileName(variable.containingKtFile)
@@ -182,17 +148,33 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
         if ((method as KtNamed).nameAsName!!.isAnonymous) {
             println("TODO: Implement lambda name resolver")
         } else {
-            /*builder.addLocalVariableReference(
+            val typeRef = when {
+                variable is KtDestructuringDeclarationEntry -> variable // TODO This should be handled properly
+                variable.children[0] is KtCallExpression -> (variable.children[0] as KtCallExpression).calleeExpression // TODO This also should be type reference
+                variable.children[0] is KtQualifiedExpression -> (variable.children[0] as KtDotQualifiedExpression).selectorExpression // TODO This also should be type reference
+                variable.children[0] is KtConstantExpression -> variable.children[0] // TODO This should be handled properly
+                variable.children.size == 2 && variable.children[1] is KtCallExpression -> {
+                    variable.children[0] as KtTypeReference
+                }
+                variable.children.size == 2 && variable.children[1] is KtLambdaExpression -> {
+                    variable.children[0] as KtTypeReference
+                }
+                else -> {
+                    error("Unable to parse property")
+                }
+            }
+
+            builder.addLocalVariableReference(
                 variable.startOffset,
                 variable.textLength,
                 variable.name!!,
                 classOrFileName,
                 method.name,
-                methodDescription.computeJvmDescriptor(),
+                methodDescriptor,
                 localVars.lastIndex,
-                getTypeSignature(variableDescriptor.type),
+                typeRef.toString() // TODO THIS,
                 //element.typeReference!!.name!! // Type was Ljava/util/function/Consumer; or I in the test
-            )*/
+            )
         }
     }
 
@@ -255,10 +237,31 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
     fun List<PsiElement>.visitAll(allowEmpty: Boolean = false) {
         if (!allowEmpty && isEmpty()) {
             println("EMPTY!")
-            println(getStackTrace())
+            Throwable().printStackTrace()
         }
         forEach {
             it.accept(this@KotlinWalker)
+        }
+    }
+
+    // Get the full binary name, including L; wrappers around class names
+    fun getTypeSignature(type: KtTypeReference): String {
+        return "L${type.getAbbreviatedTypeOrType(bindingTrace.bindingContext)!!.getJetTypeFqName(false).replace('.', '/')};"
+    }
+
+    private fun functionDescriptor(element: KtFunction): String {
+        require(element is KtNamedFunction || element is KtFunctionLiteral)
+
+        return buildString {
+            this.append('(')
+            val (values, ret) = if (element is KtFunctionLiteral) {
+                val lambdaType = (element.parent.parent as KtCallableDeclaration).typeReference!!.firstChild as KtFunctionType
+                lambdaType.parameters.map { it.typeReference!! } to lambdaType.returnTypeReference
+            } else {
+                element.valueParameters.map { it.typeReference!! } to element.typeReference
+            }
+
+            values
         }
     }
 
@@ -281,11 +284,6 @@ private fun internalClassName(element: KtClassOrObject): String {
     } else {
         segments.joinToString(separator = "/")
     }
-}
-
-// Get the full binary name, including L; wrappers around class names
-fun getTypeSignature(type: KotlinType): String {
-    return "L${type.getJetTypeFqName(false).replace('.', '/')};"
 }
 
 // Notes on how original srg2source handles variables:

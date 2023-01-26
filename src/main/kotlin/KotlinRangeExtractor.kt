@@ -1,11 +1,17 @@
-import com.intellij.psi.PsiManager
-import com.intellij.testFramework.LightVirtualFile
+import kastree.ast.psi.Parser
 import net.minecraftforge.srg2source.api.InputSupplier
 import net.minecraftforge.srg2source.range.RangeMap
 import net.minecraftforge.srg2source.range.RangeMapBuilder
 import net.minecraftforge.srg2source.util.Util
 import net.minecraftforge.srg2source.util.io.ConfLogger
+import org.jetbrains.kotlin.com.intellij.psi.PsiErrorElement
+import org.jetbrains.kotlin.com.intellij.psi.PsiFileFactory
+import org.jetbrains.kotlin.com.intellij.psi.PsiManager
+import org.jetbrains.kotlin.com.intellij.testFramework.LightVirtualFile
 import org.jetbrains.kotlin.idea.KotlinFileType
+import org.jetbrains.kotlin.idea.KotlinLanguage
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
 import java.io.File
 import java.io.InputStream
 import java.io.PrintWriter
@@ -69,8 +75,14 @@ class KotlinRangeExtractor(
 
                 log("start Processing \"$path\" md5: $md5")
 
+                val ktFile = PsiManager.getInstance(parser.project).findFile(LightVirtualFile(path, KotlinFileType.INSTANCE, code)) as KtFile
+                val parsed = CustomConverter().convertFile(ktFile.also { file ->
+                    file.collectDescendantsOfType<PsiErrorElement>().let {
+                        if (it.isNotEmpty()) throw Parser.ParseError(file, it)
+                    }
+                })
 
-                val ktFile = PsiManager.getInstance(parser.project).findFile(LightVirtualFile(path, KotlinFileType.INSTANCE, code))!!
+                //KastVisitor(builder).visit(parsed)
                 // val ktFile = PsiFileFactory.getInstance(environment.project).createFileFromText(KotlinLanguage.INSTANCE, code)
                 ktFile.accept(KotlinWalker(builder, serviceResolver))
 

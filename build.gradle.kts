@@ -14,8 +14,10 @@ repositories {
 
 dependencies {
     testImplementation(kotlin("test"))
-    implementation(kotlin("compiler"))
+    implementation(kotlin("compiler-embeddable"))
     implementation("net.minecraftforge:Srg2Source:8.0.8")
+    implementation("com.github.cretz.kastree:kastree-ast-jvm:0.4.0")
+    implementation("com.github.cretz.kastree:kastree-ast-psi:0.4.0")
 }
 
 tasks.test {
