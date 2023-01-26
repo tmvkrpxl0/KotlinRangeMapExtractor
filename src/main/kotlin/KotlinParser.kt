@@ -9,7 +9,6 @@ import org.jetbrains.kotlin.analyzer.common.CommonResolverForModuleFactory
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
 import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
 import org.jetbrains.kotlin.cli.common.config.addKotlinSourceRoot
-import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.FilteringMessageCollector
 import org.jetbrains.kotlin.cli.common.messages.MessageRenderer
 import org.jetbrains.kotlin.cli.common.messages.PrintingMessageCollector
@@ -26,8 +25,8 @@ import org.jetbrains.kotlin.metadata.jvm.deserialization.JvmMetadataVersion
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.CommonPlatforms
 import org.jetbrains.kotlin.platform.TargetPlatform
-import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.resolve.*
+import org.jetbrains.kotlin.resolve.CompilerEnvironment
+import org.jetbrains.kotlin.resolve.PlatformDependentAnalyzerServices
 import java.io.File
 import java.io.PrintStream
 
@@ -39,11 +38,9 @@ class KotlinParser(
 ) {
     private val messageCollector = FilteringMessageCollector(
         PrintingMessageCollector(logger, MessageRenderer.GRADLE_STYLE, true)
-    ) { severity ->
-        !logWarnings && severity == CompilerMessageSeverity.WARNING
-    }
+    ) { logWarnings || !it.isWarning }
 
-    val configuration = CompilerConfiguration().apply {
+    private val configuration = CompilerConfiguration().apply {
         put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, messageCollector)
         val arguments = K2JVMCompilerArguments()
         arguments.verbose = true
@@ -54,49 +51,50 @@ class KotlinParser(
         addKotlinSourceRoot(kotlinRoot)
     }
 
-    fun getResolverAndFiles(): Pair<ResolverForModule, List<KtFile>> {
-        val rootDisposable = Disposer.newDisposable()
-        try {
-            val environment = KotlinCoreEnvironment.createForProduction(
-                rootDisposable,
-                configuration,
-                EnvironmentConfigFiles.JVM_CONFIG_FILES
-            )
+    private val rootDisposable = Disposer.newDisposable()
 
-            val ktFiles = environment.getSourceFiles()
+    private val environment = KotlinCoreEnvironment.createForProduction(
+        rootDisposable,
+        configuration,
+        EnvironmentConfigFiles.JVM_CONFIG_FILES
+    )
 
-            val moduleInfo = SourceModuleInfo(Name.special("<main"), mapOf(), false)
-            val project = ktFiles.firstOrNull()?.project ?: throw AssertionError("No files to analyze")
+    val files = environment.getSourceFiles()
 
-            val resolverForModuleFactory = CommonResolverForModuleFactory(
-                CommonAnalysisParameters({ content ->
-                    environment.createPackagePartProvider(content.moduleContentScope)
-                }),
-                CompilerEnvironment,
-                CommonPlatforms.defaultCommonPlatform,
-                shouldCheckExpectActual = false
-            )
+    val project = environment.project
 
-            val resolver = ResolverForSingleModuleProject(
-                "sources for metadata serializer",
-                ProjectContext(project, "metadata serializer"),
-                moduleInfo,
-                resolverForModuleFactory,
-                GlobalSearchScope.allScope(project),
-                languageVersionSettings = configuration.languageVersionSettings,
-                syntheticFiles = ktFiles
-            )
+    fun getResolver(): ResolverForModule {
+        val moduleInfo = SourceModuleInfo(Name.special("<main"), mapOf(), false)
+
+        val resolverForModuleFactory = CommonResolverForModuleFactory(
+            CommonAnalysisParameters({ content ->
+                environment.createPackagePartProvider(content.moduleContentScope)
+            }),
+            CompilerEnvironment,
+            CommonPlatforms.defaultCommonPlatform,
+            shouldCheckExpectActual = false
+        )
+
+        val resolver = ResolverForSingleModuleProject(
+            "sources for metadata serializer",
+            ProjectContext(project, "metadata serializer"),
+            moduleInfo,
+            resolverForModuleFactory,
+            GlobalSearchScope.allScope(project),
+            languageVersionSettings = configuration.languageVersionSettings,
+            syntheticFiles = files
+        )
 
             // There are multiple interesting services, I might need to look into this...
-            return resolver.resolverForModule(moduleInfo) to ktFiles
-        } finally {
-            rootDisposable.dispose()
-            if (messageCollector.hasErrors()) {
-                throw RuntimeException("Compilation error")
-            }
-        }
+            return resolver.resolverForModule(moduleInfo)
     }
 
+    fun dispose() {
+        rootDisposable.dispose()
+        if (messageCollector.hasErrors()) {
+            throw RuntimeException("Compilation error")
+        }
+    }
 }
 
 private class SourceModuleInfo(

@@ -1,139 +1,206 @@
 import com.intellij.codeWithMe.getStackTrace
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiWhiteSpace
+import com.intellij.psi.*
+import com.intellij.psi.impl.source.tree.LeafPsiElement
 import net.minecraftforge.srg2source.range.RangeMapBuilder
+import org.jetbrains.kotlin.analyzer.ResolverForModule
 import org.jetbrains.kotlin.backend.common.serialization.mangle.ir.isAnonymous
+import org.jetbrains.kotlin.builtins.KotlinBuiltIns
+import org.jetbrains.kotlin.builtins.isSuspendFunctionType
 import org.jetbrains.kotlin.cfg.containingDeclarationForPseudocode
 import org.jetbrains.kotlin.cfg.getDeclarationDescriptorIncludingConstructors
+import org.jetbrains.kotlin.container.get
+import org.jetbrains.kotlin.descriptors.CallableMemberDescriptor
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
-import org.jetbrains.kotlin.descriptors.VariableDescriptor
+import org.jetbrains.kotlin.descriptors.impl.AnonymousFunctionDescriptor
 import org.jetbrains.kotlin.js.descriptorUtils.getJetTypeFqName
-import org.jetbrains.kotlin.kdoc.psi.api.KDoc
+import org.jetbrains.kotlin.kdoc.psi.api.KDocElement
 import org.jetbrains.kotlin.load.kotlin.computeJvmDescriptor
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
+import org.jetbrains.kotlin.psi.psiUtil.getAnnotationEntries
 import org.jetbrains.kotlin.psi.psiUtil.isTopLevelKtOrJavaMember
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
-import org.jetbrains.kotlin.resolve.BindingContext
-import org.jetbrains.kotlin.resolve.calls.util.getCall
+import org.jetbrains.kotlin.resolve.*
+import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowInfo
+import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowValueFactory
+import org.jetbrains.kotlin.resolve.calls.util.getResolvedCall
+import org.jetbrains.kotlin.resolve.jvm.JvmBindingContextSlices
+import org.jetbrains.kotlin.resolve.lazy.LazyDeclarationResolver
+import org.jetbrains.kotlin.resolve.lazy.LocalDescriptorResolver
+import org.jetbrains.kotlin.resolve.lazy.ResolveSession
+import org.jetbrains.kotlin.resolve.scopes.ScopeUtils
+import org.jetbrains.kotlin.resolve.source.toSourceElement
 import org.jetbrains.kotlin.types.KotlinType
-import org.jetbrains.kotlin.types.isError
-import org.jetbrains.kotlin.util.isOrdinaryClass
+import org.jetbrains.kotlin.types.TypeUtils.NO_EXPECTED_TYPE
+import org.jetbrains.kotlin.types.checker.KotlinTypeChecker
+import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
+import org.jetbrains.kotlin.types.expressions.ExpressionTypingVisitor
+import org.jetbrains.kotlin.types.expressions.ExpressionTypingVisitorDispatcher
 import java.util.*
+import kotlin.random.Random
+import kotlin.random.nextInt
 
 // TODO Figure out how to resolve origin of givin element
-class KotlinWalker(private val builder: RangeMapBuilder, private val bindingContext: BindingContext) {
-    fun onBlock(element: KtBlockExpression) {
-        element.visitChildren()
+class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: ResolverForModule): KtVisitorVoid() {
+    val analyzer = serviceResolver.componentProvider.get<LazyTopDownAnalyzer>()
+    val resolveSession = serviceResolver.componentProvider.get<ResolveSession>()
+    val expressionTypes = serviceResolver.componentProvider.get<ExpressionTypingServices>()
+    val localVarResolver = serviceResolver.componentProvider.get<LocalVariableResolver>()
+    val typeChecker = serviceResolver.componentProvider.get<KotlinTypeChecker>()
+    val overrides = serviceResolver.componentProvider.get<OverrideResolver>()
+    val types = serviceResolver.componentProvider.get<TypeResolver>()
+    val bindingTrace = serviceResolver.componentProvider.get<BindingTraceContext>()
+    val dataflows = serviceResolver.componentProvider.get<DataFlowValueFactory>()
+    val declarations = serviceResolver.componentProvider.get<DeclarationResolver>()
+    val expressionTypeVisitor = serviceResolver.componentProvider.get<ExpressionTypingVisitor>()
+    val descriptions = serviceResolver.componentProvider.get<DescriptorResolver>()
+    val expressionTypeDispatcher = serviceResolver.componentProvider.get<ExpressionTypingVisitorDispatcher>()
+    val builtIns = serviceResolver.componentProvider.get<KotlinBuiltIns>()
+    val lazyDeclarations = serviceResolver.componentProvider.get<LazyDeclarationResolver>()
+    val localDescriptions = serviceResolver.componentProvider.get<LocalDescriptorResolver>()
+    val functions = serviceResolver.componentProvider.get<FunctionDescriptorResolver>()
+    val annotations = serviceResolver.componentProvider.get<AnnotationResolver>()
+
+
+    override fun visitBreakExpression(expression: KtBreakExpression) {
+        println("Break: ${expression.children}")
+
+        handled = true
+        return super.visitBreakExpression(expression)
     }
 
-    fun onBreak() {
-        return
+    override fun visitPackageDirective(directive: KtPackageDirective) {
+        handled = true
+        if (!directive.isRoot) builder.addPackageReference(directive.startOffset, directive.textLength, directive.fqName.asString())
+        return super.visitPackageDirective(directive)
     }
 
-    fun onFor(element: KtForExpression) {
-        element.visitChildren()
-        return
+    override fun visitLambdaExpression(lambda: KtLambdaExpression) {
+        val name = "lambda${Random.nextInt(0..9999)}"
+        lambdaNames[lambda] = name
+
+        // val descriptor = functions.resolveFunctionExpressionDescriptor()
+
+        // builder.addMethodDeclaration(lambda.startOffset, lambda.textLength, name)
+
+        handled = true
+        lambda.valueParameters.visitAll(true)
+        lambda.bodyExpression!!.accept(this)
+
+        super.visitLambdaExpression(lambda)
     }
 
-    fun onDoc(element: KDoc) {
-        element.visitChildren()
-    }
+    override fun visitClassOrObject(klass: KtClassOrObject) {
+        val innerName = internalClassName(klass)
 
-    fun onPackage(element: KtPackageDirective) {
-        if (element.isRoot) return
-        builder.addPackageReference(element.startOffset, element.textLength, element.fqName.asString())
-    }
+        fun onClassLike() {
+            // Modifiers in java: sealed, [access modifiers], final, static, abstract, non-sealed
+            // Type Parameter: Thing<Int, String> <- Int and String
+            // Internal name examples:
+            // com.tmvkrpxl0.Test -> com/tmvkrpxl0/Test
+            // com.tmvkrpxl0.Test.InnerClass -> com/tmvkrpxl0/Test$InnerClass
+            klass.modifierList?.accept(this)
 
-    /**
-     * Called when new function with "fun" keyword is being defined.
-     */
-    fun onNamedFunction(element: KtNamedFunction) {
-        element.visitChildren()
-    }
-
-    // Huh, valueParameters returns empty list when lambda has "it" as parameter
-    // This will be an issue....
-    fun onLambda(element: KtLambdaExpression) {
-        val name = element
-        // TODO Add declaration
-        // builder.addMethodDeclaration(element.startOffset, element.textLength, )
-
-        element.valueParameters.visitAll(false)
-        visit(element.bodyExpression!!) // why is this nullable?
-    }
-
-    fun onClass(element: KtClass) {
-        // Modifiers in java: sealed, [access modifiers], final, static, abstract, non-sealed
-        // Type Parameter: Thing<Int, String> <- Int and String
-        // Internal name examples:
-        // com.tmvkrpxl0.Test -> com/tmvkrpxl0/Test
-        // com.tmvkrpxl0.Test.InnerClass -> com/tmvkrpxl0/Test$InnerClass
-
-        val innerName = internalClassName(element)
-
-        when {
-            element.isInterface() -> builder.addInterfaceDeclaration(element.startOffset, element.textLength, innerName)
-            element.isOrdinaryClass -> builder.addClassDeclaration(element.startOffset, element.textLength, innerName)
-        }
-
-        if (element.isInterface() || element.isOrdinaryClass) {
-            element.modifierList?.let { visit(it) }
-
-            val identifier = element.nameIdentifier!!
+            val identifier = klass.nameIdentifier!!
             builder.addClassReference(identifier.startOffset, identifier.textLength, identifier.text, innerName, false)
 
-            element.typeParameterList?.visitChildren(true)
-            element.getSuperTypeList()?.visitChildren(true)
-            element.body?.let { visit(it) }
+            klass.typeParameterList?.accept(this)
+            klass.superTypeListEntries.visitAll(true)
+            klass.body?.accept(this)
+        }
+
+        fun onClass() {
+            builder.addClassDeclaration(klass.startOffset, klass.textLength, innerName)
+            onClassLike()
+        }
+
+        fun onInterface() {
+            builder.addInterfaceDeclaration(klass.startOffset, klass.textLength, innerName)
+            onClassLike()
+        }
+
+        fun onEnum() {
+            // TODO
+        }
+
+        fun onAnnotation() {
+            // TODO
+        }
+
+        when(klass) {
+            is KtClass -> {
+                when {
+                    klass.isAnnotation() -> onAnnotation()
+                    klass.isEnum() -> onEnum()
+                    klass.isInterface() -> onInterface()
+                    else -> onClass()
+                }
+            }
+            is KtObjectDeclaration -> {
+                onClass()
+            }
+        }
+
+        handled = true
+        super.visitClassOrObject(klass)
+    }
+
+    fun onField(variable: KtVariableDeclaration) {
+
+    }
+
+    fun onLocal(variable: KtVariableDeclaration) {
+        if (localVariableTracker.isEmpty()) localVariableTracker.push(LinkedList())
+        val localVars = localVariableTracker.peek()
+
+        localVars += variable
+
+        val method = variable.containingDeclarationForPseudocode as KtFunction
+
+        val scope = bindingTrace.bindingContext.get(BindingContext.LEXICAL_SCOPE, method)!!
+
+        types.resolveType(scope, method.typeReference!!, bindingTrace, true)
+        when(method) {
+            is KtNamedFunction -> {
+                functions.resolveFunctionDescriptor(scope.ownerDescriptor, scope, method, bindingTrace, DataFlowInfo.EMPTY, null)
+            }
+            is KtFunctionLiteral -> {
+                val descriptor = AnonymousFunctionDescriptor(
+                    scope.ownerDescriptor,
+                    annotations.resolveAnnotationsWithArguments(scope, method.getAnnotationEntries(), bindingTrace),
+                    CallableMemberDescriptor.Kind.DECLARATION, method.toSourceElement(),
+                    NO_EXPECTED_TYPE.isSuspendFunctionType
+                )
+            }
+            else -> throw IllegalStateException("Unable to determine type of a method")
+        }
+        val methodDescription = method.getDeclarationDescriptorIncludingConstructors(bindingTrace.bindingContext) as FunctionDescriptor
+
+        val classOrFileName = variable.containingClassOrObject?.let { internalClassName(it) }
+            ?: internalFileName(variable.containingKtFile)
+
+        if ((method as KtNamed).nameAsName!!.isAnonymous) {
+            println("TODO: Implement lambda name resolver")
+        } else {
+            /*builder.addLocalVariableReference(
+                variable.startOffset,
+                variable.textLength,
+                variable.name!!,
+                classOrFileName,
+                method.name,
+                methodDescription.computeJvmDescriptor(),
+                localVars.lastIndex,
+                getTypeSignature(variableDescriptor.type),
+                //element.typeReference!!.name!! // Type was Ljava/util/function/Consumer; or I in the test
+            )*/
         }
     }
 
-    /**
-     * Called when there is modifier such as visibility modifiers, inner keyword
-     */
-    fun onModifiers(modifiers: KtModifierList) {
-        modifiers.visitChildren(true)
-    }
+    override fun visitDestructuringDeclarationEntry(entry: KtDestructuringDeclarationEntry) {
+        handled = true
 
-    // In original srg2source, BodyDeclaration is for everything that can have body
-    // subclass, functions, etc
-    fun onBody(body: KtClassBody) {
-        body.visitChildren(true)
-    }
-
-    // Visits children of each Type Parameter(seems to be always empty??), name, and type bounds
-    fun onTypeParameter(typeParameter: KtTypeParameter) {
-        typeParameter.visitChildren()
-    }
-
-    /**
-     * Called when there is import. Ignored in original range map extractor
-     */
-    fun onImportList() {
-        return
-    }
-
-    /**
-     * Called when there is white space such as new line, space, tab, etc...
-     */
-    fun onWhiteSpace() {
-        return
-    }
-
-    /**
-     * Called when there is any kind of String, either multiline or not.
-     * This does not include char with ', it must be "
-     */
-    fun onString() {
-        return
-    }
-
-    /**
-     * Called when it starts compiling a file, kind of like entry point of compilation.
-     */
-    fun onFile(file: KtFile) {
-        file.visitChildren()
+        onLocal(entry)
+        super.visitDestructuringDeclarationEntry(entry)
     }
 
     /**
@@ -144,55 +211,16 @@ class KotlinWalker(private val builder: RangeMapBuilder, private val bindingCont
      * If it's extension variable, for now let's just convert "Class.varName" to "Class$varName"
      * I... really don't think anyone using kotlin would legit use $
      */
-    fun onVariable(element: KtVariableDeclaration) {
-        val isField = element is KtDestructuringDeclarationEntry ||
-                element.isTopLevelKtOrJavaMember() ||
-                (element as KtProperty).isMember
+    override fun visitProperty(property: KtProperty) {
+        handled = true
+        val isField = property.isTopLevelKtOrJavaMember() || property.isMember
 
-
-        if (!isField) {
-            if (localVariableTracker.isEmpty()) localVariableTracker.push(LinkedList())
-            val localVars = localVariableTracker.peek()
-
-            val variableDescriptor: VariableDescriptor =
-                element.getDeclarationDescriptorIncludingConstructors(bindingContext)
-                        as VariableDescriptor // I'm unsure if this case is safe
-            localVars += variableDescriptor
-
-            val method = element.containingDeclarationForPseudocode!!
-
-            val classOrFileName = element.containingClassOrObject?.let { internalClassName(it) }
-                ?: internalFileName(element.containingKtFile)
-
-            if ((method as KtNamed).nameAsName!!.isAnonymous) {
-                println("TODO: Implement lambda name resolver")
-            } else {
-                val enclosingDescriptor = method.getDeclarationDescriptorIncludingConstructors(bindingContext)
-                        as FunctionDescriptor
-
-                require(!variableDescriptor.type.isError)
-
-                builder.addLocalVariableReference(
-                    element.startOffset,
-                    element.textLength,
-                    element.name!!,
-                    classOrFileName,
-                    method.name,
-                    enclosingDescriptor.computeJvmDescriptor(),
-                    localVars.lastIndex,
-                    getTypeSignature(variableDescriptor.type),
-                    //element.typeReference!!.name!! // Type was Ljava/util/function/Consumer; or I in the test
-                )
-            }
+        if (isField) {
+            onField(property)
         } else {
-
+            onLocal(property)
         }
-        println("On variable enclosing element: ${element.parent}")
-        element.visitChildren()
-    }
-
-    fun onDestructing(element: KtDestructuringDeclaration) {
-        element.visitChildren()
+        super.visitProperty(property)
     }
 
     /**
@@ -206,59 +234,22 @@ class KotlinWalker(private val builder: RangeMapBuilder, private val bindingCont
      */
     fun onCall(element: KtCallElement) {
         // TODO figure out how to get origin of callee expression
-        element.calleeExpression!!.getCall(bindingContext)
         val owner = element.calleeExpression!!
     }
 
-    /**
-     * Called when there is expression with dots, such as `Class.forName`
-     * This also includes field access, both static and non-static
-     * However this does not include extension functions declaration.
-     */
-    fun onDotQualified(element: KtDotQualifiedExpression) {
-        element.visitChildren()
-    }
-
-    /**
-     * Called when there is:
-     * * Condition, such as ==, >=
-     * * Loop range
-     * * Label qualifier, such as `break@forEach`
-     * * Indicies, TODO figure out this
-     * ----------------------------------
-     * * If
-     * * Else
-     * * Body of If statement, for If, Else-If, Else
-     */
-    fun onSpecial(element: KtContainerNode) {
-        element.visitChildren()
-    }
-
-    fun visit(element: PsiElement) {
-        when (element) {
-            is KtNamedFunction -> onNamedFunction(element)
-            is KtForExpression -> onFor(element)
-            is KtBreakExpression -> onBreak()
-            is KtPackageDirective -> onPackage(element)
-            is KtBlockExpression -> onBlock(element)
-            is KtClass -> onClass(element)
-            is KtImportList -> onImportList()
-            is PsiWhiteSpace -> onWhiteSpace()
-            is KtFile -> onFile(element)
-            is KDoc -> onDoc(element)
-            is KtStringTemplateExpression -> onString()
-            is KtVariableDeclaration -> onVariable(element)
-            is KtModifierList -> onModifiers(element)
-            is KtClassBody -> onBody(element)
-            is KtCallElement -> onCall(element)
-            is KtDotQualifiedExpression -> onDotQualified(element)
-            is KtDestructuringDeclaration -> onDestructing(element)
-            is KtLambdaExpression -> onLambda(element)
-            is KtContainerNode -> onSpecial(element)
-            else -> {
-                println("Unhandled type: $element")
-            }
+    override fun visitElement(element: PsiElement) {
+        when(element) {
+            is LeafPsiElement, is PsiWhiteSpace, is PsiFile, is KDocElement -> { handled = true }
         }
+
+        if (!handled) {
+            println("UNHANDLED ELEMENT: ${element.javaClass.simpleName}($element ${element.text})")
+        }
+        handled = false
+
+        if (element is KtClassOrObject) return
+
+        element.acceptChildren(this)
     }
 
     fun List<PsiElement>.visitAll(allowEmpty: Boolean = false) {
@@ -267,21 +258,14 @@ class KotlinWalker(private val builder: RangeMapBuilder, private val bindingCont
             println(getStackTrace())
         }
         forEach {
-            visit(it)
+            it.accept(this@KotlinWalker)
         }
     }
 
-    fun PsiElement.visitChildren(allowEmpty: Boolean = false) {
-        if (!allowEmpty && children.isEmpty()) {
-            println("EMPTY!")
-            println(getStackTrace())
-        }
-        children.forEach {
-            visit(it)
-        }
-    }
-
-    private val localVariableTracker = Stack<MutableList<VariableDescriptor>>()
+    private var handled = false
+    private val localVariableTracker = Stack<MutableList<KtVariableDeclaration>>()
+    // TODO Find better ways of resolving lambda names
+    private val lambdaNames = HashMap<KtLambdaExpression, String>()
 }
 
 private fun internalFileName(element: KtFile): String {
@@ -317,6 +301,9 @@ fun getTypeSignature(type: KotlinType): String {
 // StructureEntry defines what can be StructureEntry, it's things like method, class, etc...
 // I was thinking of somehow using that system to define property function of val/var
 // But it seems impossible
+
+// In original srg2source, BodyDeclaration is for everything that can have body
+// subclass, functions, etc
 
 /**
  * KtFile
