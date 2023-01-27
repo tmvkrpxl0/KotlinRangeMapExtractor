@@ -1,36 +1,27 @@
 import net.minecraftforge.srg2source.range.RangeMapBuilder
-import org.jetbrains.kotlin.analyzer.ResolverForModule
+import org.jetbrains.kotlin.analyzer.AnalysisResult
 import org.jetbrains.kotlin.backend.common.serialization.mangle.ir.isAnonymous
-import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.cfg.containingDeclarationForPseudocode
 import org.jetbrains.kotlin.com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.com.intellij.psi.PsiFile
 import org.jetbrains.kotlin.com.intellij.psi.PsiWhiteSpace
 import org.jetbrains.kotlin.com.intellij.psi.impl.source.tree.LeafPsiElement
-import org.jetbrains.kotlin.container.get
 import org.jetbrains.kotlin.js.descriptorUtils.getJetTypeFqName
 import org.jetbrains.kotlin.kdoc.psi.api.KDocElement
+import org.jetbrains.kotlin.load.kotlin.computeJvmDescriptor
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 import org.jetbrains.kotlin.psi.psiUtil.isTopLevelKtOrJavaMember
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
 import org.jetbrains.kotlin.resolve.*
 import org.jetbrains.kotlin.resolve.bindingContextUtil.getAbbreviatedTypeOrType
-import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowValueFactory
-import org.jetbrains.kotlin.resolve.lazy.LazyDeclarationResolver
-import org.jetbrains.kotlin.resolve.lazy.LocalDescriptorResolver
-import org.jetbrains.kotlin.resolve.lazy.ResolveSession
-import org.jetbrains.kotlin.types.checker.KotlinTypeChecker
-import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
-import org.jetbrains.kotlin.types.expressions.ExpressionTypingVisitor
-import org.jetbrains.kotlin.types.expressions.ExpressionTypingVisitorDispatcher
 import java.util.*
-import kotlin.random.Random
-import kotlin.random.nextInt
 
 // TODO Figure out how to resolve origin of givin element
-class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: ResolverForModule): KtVisitorVoid() {
-    val analyzer = serviceResolver.componentProvider.get<LazyTopDownAnalyzer>()
+class KotlinWalker(private val builder: RangeMapBuilder, val result: AnalysisResult): KtVisitorVoid() {
+    val bindingContext = result.bindingContext
+
+    /*val analyzer = serviceResolver.componentProvider.get<LazyTopDownAnalyzer>()
     val resolveSession = serviceResolver.componentProvider.get<ResolveSession>()
     val expressionTypes = serviceResolver.componentProvider.get<ExpressionTypingServices>()
     val localVarResolver = serviceResolver.componentProvider.get<LocalVariableResolver>()
@@ -47,13 +38,7 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
     val lazyDeclarations = serviceResolver.componentProvider.get<LazyDeclarationResolver>()
     val localDescriptions = serviceResolver.componentProvider.get<LocalDescriptorResolver>()
     val functions = serviceResolver.componentProvider.get<FunctionDescriptorResolver>()
-    val annotations = serviceResolver.componentProvider.get<AnnotationResolver>()
-
-
-    override fun visitBreakExpression(expression: KtBreakExpression) {
-        handled = true
-        return super.visitBreakExpression(expression)
-    }
+    val annotations = serviceResolver.componentProvider.get<AnnotationResolver>()*/
 
     override fun visitPackageDirective(directive: KtPackageDirective) {
         handled = true
@@ -62,16 +47,12 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
     }
 
     override fun visitLambdaExpression(lambda: KtLambdaExpression) {
-        val name = "lambda${Random.nextInt(0..9999)}"
-        lambdaNames[lambda] = name
-
-        // builder.addMethodDeclaration(lambda.startOffset, lambda.textLength, name)
+        val descriptor = bindingContext[BindingContext.FUNCTION, lambda]!!
+        builder.addMethodDeclaration(lambda.startOffset, lambda.textLength, descriptor.name.asString(), descriptor.computeJvmDescriptor())
 
         handled = true
         lambda.valueParameters.visitAll(true)
         lambda.bodyExpression!!.accept(this)
-
-        super.visitLambdaExpression(lambda)
     }
 
     override fun visitClassOrObject(klass: KtClassOrObject) {
@@ -205,23 +186,18 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
         super.visitProperty(property)
     }
 
-    /**
-     * Called when there is function call. element itself is only about method name, and it has no field/class name.
-     * There are 4 types of this<br>
-     *
-     * * KtAnnotationEntry -> when there is annotation on an element. this excludes file annotation.
-     * * KtCallExpression -> when there is function invocation.
-     * * KtConstructorDelegationCall -> in `Class Child: Super(1)`, `Super(1)` part is the supplied element.
-     * * KtSuperTypeCallEntry -> TODO! currently unknown
-     */
-    fun onCall(element: KtCallElement) {
-        // TODO figure out how to get origin of callee expression
-        val owner = element.calleeExpression!!
+    // In original srg2source when there is method it does nothing and visits children
+    // The node is full expression, including variable(or class name if it's static) name
+    // When visiting children, thing on the left(class or variable) is recorded first
+    // and then the method itself.
+    override fun visitCallExpression(expression: KtCallExpression) {
+        val calling = bindingContext[BindingContext.CALL, expression.calleeExpression]!!
+        // builder.addMethodReference()
     }
 
     override fun visitElement(element: PsiElement) {
         when(element) {
-            is LeafPsiElement, is PsiWhiteSpace, is PsiFile, is KDocElement -> { handled = true }
+            is LeafPsiElement, is PsiWhiteSpace, is PsiFile, is KDocElement, is KtBreakExpression -> { handled = true }
         }
 
         if (!handled) {
@@ -246,7 +222,7 @@ class KotlinWalker(private val builder: RangeMapBuilder, serviceResolver: Resolv
 
     // Get the full binary name, including L; wrappers around class names
     fun getTypeSignature(type: KtTypeReference): String {
-        return "L${type.getAbbreviatedTypeOrType(bindingTrace.bindingContext)!!.getJetTypeFqName(false).replace('.', '/')};"
+        return "L${type.getAbbreviatedTypeOrType(bindingContext)!!.getJetTypeFqName(false).replace('.', '/')};"
     }
 
     private fun functionDescriptor(element: KtFunction): String {

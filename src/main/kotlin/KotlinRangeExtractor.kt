@@ -1,17 +1,10 @@
-import kastree.ast.psi.Parser
 import net.minecraftforge.srg2source.api.InputSupplier
 import net.minecraftforge.srg2source.range.RangeMap
 import net.minecraftforge.srg2source.range.RangeMapBuilder
 import net.minecraftforge.srg2source.util.Util
 import net.minecraftforge.srg2source.util.io.ConfLogger
-import org.jetbrains.kotlin.com.intellij.psi.PsiErrorElement
-import org.jetbrains.kotlin.com.intellij.psi.PsiFileFactory
-import org.jetbrains.kotlin.com.intellij.psi.PsiManager
-import org.jetbrains.kotlin.com.intellij.testFramework.LightVirtualFile
-import org.jetbrains.kotlin.idea.KotlinFileType
-import org.jetbrains.kotlin.idea.KotlinLanguage
-import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
+import net.minecraftforge.srg2source.util.io.FolderSupplier
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.local.CoreLocalVirtualFile
 import java.io.File
 import java.io.InputStream
 import java.io.PrintWriter
@@ -19,13 +12,12 @@ import java.nio.charset.StandardCharsets
 
 class KotlinRangeExtractor(
     private val input: InputSupplier,
-    root: String = input.getRoot("/")!!,
     var output: PrintWriter? = null,
     val logWarnings: Boolean = false,
 ) : ConfLogger<KotlinRangeExtractor>() {
     private val libs: MutableSet<File> = LinkedHashSet()
     private val fileCache: MutableMap<String, RangeMap> = HashMap() // Relative Path from package root -> RangeMap
-    private val parser = KotlinParser(logger, logWarnings, libs.toList(), root)
+    private val parser = KotlinParser(logger, logWarnings, libs.toList(), input)
     var cacheHits = 0
         private set
 
@@ -61,10 +53,19 @@ class KotlinRangeExtractor(
     }
 
     private fun generate(paths: List<String>): Boolean {
-        val serviceResolver = parser.getResolver()
-
+        // TODO  Input supplier's root may be relative location, but VirtualFileSystem uses absolute path
+        // and it might not even be local file system because ZipInputSupplier exist
+        if (input !is FolderSupplier) errorLogger.println("Currently only Folder supplier works!")
+        val ktFiles = paths.map { path ->
+            parser.files.find { file ->
+                val root = input.getRoot(path)!!
+                val absoluteRoot = File(root).resolve(path)
+                file.virtualFilePath == absoluteRoot.absolutePath
+            }!!
+        }
         try {
-            paths.forEach { path ->
+            ktFiles.forEach { ktFile ->
+                val path = ktFile.virtualFilePath
                 val encoding = input.getEncoding(path) ?: StandardCharsets.UTF_8
                 val code = input.getInput(path)!!.bufferedReader(encoding).readText()
 
@@ -75,16 +76,7 @@ class KotlinRangeExtractor(
 
                 log("start Processing \"$path\" md5: $md5")
 
-                val ktFile = PsiManager.getInstance(parser.project).findFile(LightVirtualFile(path, KotlinFileType.INSTANCE, code)) as KtFile
-                val parsed = CustomConverter().convertFile(ktFile.also { file ->
-                    file.collectDescendantsOfType<PsiErrorElement>().let {
-                        if (it.isNotEmpty()) throw Parser.ParseError(file, it)
-                    }
-                })
-
-                //KastVisitor(builder).visit(parsed)
-                // val ktFile = PsiFileFactory.getInstance(environment.project).createFileFromText(KotlinLanguage.INSTANCE, code)
-                ktFile.accept(KotlinWalker(builder, serviceResolver))
+                ktFile.accept(KotlinWalker(builder, parser.result))
 
                 val rangeMap = builder.build()
                 if (output != null) {
