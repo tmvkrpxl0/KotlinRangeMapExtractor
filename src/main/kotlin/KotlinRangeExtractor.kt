@@ -4,7 +4,6 @@ import net.minecraftforge.srg2source.range.RangeMapBuilder
 import net.minecraftforge.srg2source.util.Util
 import net.minecraftforge.srg2source.util.io.ConfLogger
 import net.minecraftforge.srg2source.util.io.FolderSupplier
-import org.jetbrains.kotlin.com.intellij.openapi.vfs.local.CoreLocalVirtualFile
 import java.io.File
 import java.io.InputStream
 import java.io.PrintWriter
@@ -57,26 +56,25 @@ class KotlinRangeExtractor(
         // and it might not even be local file system because ZipInputSupplier exist
         if (input !is FolderSupplier) errorLogger.println("Currently only Folder supplier works!")
         val ktFiles = paths.map { path ->
+            val root = input.getRoot(path)!!
+            val absoluteRoot = File(root).resolve(path)
+
             parser.files.find { file ->
-                val root = input.getRoot(path)!!
-                val absoluteRoot = File(root).resolve(path)
                 file.virtualFilePath == absoluteRoot.absolutePath
-            }!!
+            }!! to path
         }
         try {
-            ktFiles.forEach { ktFile ->
-                val path = ktFile.virtualFilePath
+            ktFiles.forEach { (ktFile, path) ->
                 val encoding = input.getEncoding(path) ?: StandardCharsets.UTF_8
-                val code = input.getInput(path)!!.bufferedReader(encoding).readText()
 
-                val md5 = Util.md5(code, StandardCharsets.UTF_8)
+                val md5 = Util.md5(ktFile.text, encoding)
                 val builder = RangeMapBuilder(this, path, md5)
 
                 // TODO Implement caching
 
                 log("start Processing \"$path\" md5: $md5")
 
-                ktFile.accept(KotlinWalker(builder, parser.result))
+                ktFile.accept(KotlinWalker(builder, errorLogger, parser.result))
 
                 val rangeMap = builder.build()
                 if (output != null) {
