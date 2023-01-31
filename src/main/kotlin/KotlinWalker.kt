@@ -1,5 +1,6 @@
 import net.minecraftforge.srg2source.range.RangeMapBuilder
 import org.jetbrains.kotlin.analyzer.AnalysisResult
+import org.jetbrains.kotlin.backend.common.serialization.mangle.ir.isAnonymous
 import org.jetbrains.kotlin.com.intellij.openapi.util.Key
 import org.jetbrains.kotlin.com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.com.intellij.psi.PsiFile
@@ -16,6 +17,8 @@ import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.*
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.descriptorUtil.classId
+import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameSafe
+import org.jetbrains.kotlin.resolve.descriptorUtil.overriddenTreeUniqueAsSequence
 import org.jetbrains.kotlin.resolve.source.getPsi
 import org.jetbrains.kotlin.types.KotlinType
 import java.io.PrintStream
@@ -76,7 +79,7 @@ class KotlinWalker(
         val methodDescriptor = descriptor.containingDeclaration as FunctionDescriptor
 
         val container = getContainingClassOrFile(descriptor)
-        val method = methodDescriptor.source.getPsi()!! as KtFunction
+        val method = methodDescriptor.source.getPsi()!! as KtDeclarationWithBody
 
         builder.addParameterReference(
             name.startOffset,
@@ -92,12 +95,20 @@ class KotlinWalker(
     }
     override fun visitSimpleNameExpression(expression: KtSimpleNameExpression) {
         handled = true
-
-        val descriptor = bindingContext[BindingContext.REFERENCE_TARGET, expression]!!
         var earlyReturn = false
+
+        if (expression is KtLabelReferenceExpression) earlyReturn = true
+        val descriptor = bindingContext[BindingContext.REFERENCE_TARGET, expression]
 
         if (descriptor is PackageViewDescriptor) earlyReturn = true
         if (descriptor is PackageFragmentDescriptor) earlyReturn = true
+        if (expression is KtOperationReferenceExpression && descriptor == null) {
+            println("Ignoring operator expression ${expression.operationSignTokenType} in ${expression.context?.text}")
+            earlyReturn = true
+        }
+
+        if (earlyReturn) return super.visitSimpleNameExpression(expression)
+        descriptor!!
 
         fun onVariableReference() {
             descriptor as VariableDescriptor
@@ -106,7 +117,7 @@ class KotlinWalker(
             when (descriptor) {
                 is LocalVariableDescriptor, is ValueParameterDescriptor -> {
                     val parent = descriptor.containingDeclaration as FunctionDescriptor
-                    val method = (parent.toSourceElement.getPsi()!!) as KtFunction
+                    val method = (parent.toSourceElement.getPsi()!!) as KtDeclarationWithBody
 
                     val index = if (descriptor is ValueParameterDescriptor) {
                         descriptor.index
@@ -117,15 +128,28 @@ class KotlinWalker(
                         index
                     }
 
-                    builder.addParameterReference(
-                        expression.startOffset,
-                        expression.textLength,
-                        expression.text,
-                        container,
-                        method.getNameMaybeLambda(),
-                        parent.computeJvmDescriptor(withName = false),
-                        index
-                    )
+                    if (descriptor is ValueParameterDescriptor) {
+                        builder.addParameterReference(
+                            expression.startOffset,
+                            expression.textLength,
+                            expression.text,
+                            container,
+                            method.getNameMaybeLambda(),
+                            parent.computeJvmDescriptor(withName = false),
+                            index
+                        )
+                    } else {
+                        builder.addLocalVariableReference(
+                            expression.startOffset,
+                            expression.textLength,
+                            expression.text,
+                            container,
+                            method.getNameMaybeLambda(),
+                            parent.computeJvmDescriptor(withName = false),
+                            index,
+                            descriptor.type.classId.jvmName(true)
+                        )
+                    }
                 }
 
                 is PropertyDescriptor -> {
@@ -149,6 +173,7 @@ class KotlinWalker(
          */
         fun onClassReference() {
             descriptor as ClassDescriptor
+            if (expression.context is KtSuperExpression) return
 
             val isQualified = expression.getQualifiedElement() is KtQualifiedExpression
 
@@ -173,7 +198,7 @@ class KotlinWalker(
             descriptor as FunctionDescriptor
 
             val receiver = expression.getQualifiedExpressionForSelector()?.receiverExpression
-            val container = getContainingClassOrFile(descriptor)
+            val container = getContainingClassOrFile(descriptor, true)
 
             var origin = descriptor.name.asString()
 
@@ -183,17 +208,33 @@ class KotlinWalker(
                 }
             }
 
-            builder.addMethodReference(
-                expression.startOffset,
-                expression.textLength,
-                expression.text,
-                container,
-                descriptor.name.asString(),
-                descriptor.computeJvmDescriptor(withName = false)
-            )
-        }
+            if (descriptor is ConstructorDescriptor) {
+                val reference = expression.getQualifiedElement()
+                val isQualified = reference is KtQualifiedExpression
 
-        if (earlyReturn) return super.visitSimpleNameExpression(expression)
+                val start = reference.startOffset
+                val end = expression.endOffset
+                val length = end - start
+                val text = expression.containingKtFile.text.substring(start, end)
+                builder.addClassReference(
+                    start,
+                    length,
+                    text,
+                    descriptor.constructedClass.classId!!.jvmName(),
+                    isQualified
+                )
+            } else {
+                builder.addMethodReference(
+                    expression.startOffset,
+                    expression.textLength,
+                    expression.text,
+                    container,
+                    descriptor.name.asString(),
+                    descriptor.computeJvmDescriptor(withName = false)
+                )
+            }
+
+        }
 
         when (descriptor) {
             is VariableDescriptor -> onVariableReference()
@@ -231,7 +272,7 @@ class KotlinWalker(
      */
     override fun visitNamedFunction(function: KtNamedFunction) {
         val descriptor = bindingContext[BindingContext.FUNCTION, function]!!
-        val owner = getContainingClassOrFile(descriptor)
+        val owner = getContainingClassOrFile(descriptor, true)
         builder.addMethodDeclaration(
             function.startOffset,
             function.textLength,
@@ -295,17 +336,6 @@ class KotlinWalker(
         builder.addFieldReference(name.startOffset, name.textLength, name.text, enumClass.getClassId()!!.jvmName())
 
         if (enumEntry.body == null) return super.visitEnumEntry(enumEntry)
-
-        val innerName = enumClass.getClassId()!!.jvmName() + "\$${enumEntry.name!!}"
-        builder.addClassDeclaration(
-            /* Due to how Srg2Source handles scope, declaration's start must come before reference */
-            /* Or reference will be outside of declaration and will be an issue */
-            /* They are actually supposed to be same though */
-            enumEntry.startOffset - 1,
-            enumEntry.textLength,
-            innerName
-        )
-        builder.addClassReference(name.startOffset, name.textLength, name.text, innerName, false)
 
         super.visitEnumEntry(enumEntry)
     }
@@ -388,7 +418,9 @@ class KotlinWalker(
         }
 
         fun onClass() {
-            builder.addClassDeclaration(klass.startOffset, klass.textLength, innerName)
+            if (!(klass is KtObjectDeclaration && klass.isCompanion() && klass.nameIdentifier == null)) {
+                builder.addClassDeclaration(klass.startOffset, klass.textLength, innerName)
+            }
             onClassLike()
         }
 
@@ -489,11 +521,11 @@ class KotlinWalker(
     }
 
     fun onField(variable: KtVariableDeclaration) {
-        val owner = variable.containingClassOrObject?.getClassId()?.asString()
-            ?: internalFileName(variable.containingKtFile)
+        val descriptor = bindingContext[BindingContext.VARIABLE, variable]!!
+        val container = getContainingClassOrFile(descriptor)
 
         val fieldName = variable.nameIdentifier!!
-        builder.addFieldReference(fieldName.startOffset, fieldName.textLength, fieldName.text, owner)
+        builder.addFieldReference(fieldName.startOffset, fieldName.textLength, fieldName.text, container)
     }
 
     fun onLocal(variable: KtVariableDeclaration) {
@@ -501,8 +533,7 @@ class KotlinWalker(
             generateSequence<KtElement>(variable) { it.parent as KtElement }.find { it is KtFunction }!! as KtFunction
         val methodDescriptor = bindingContext[BindingContext.FUNCTION, method]!!
 
-        val classOrFileName = variable.containingClassOrObject?.getClassId()?.asString()
-            ?: internalFileName(variable.containingKtFile)
+        val container = getContainingClassOrFile(methodDescriptor)
 
         val varDescriptor = bindingContext[BindingContext.VARIABLE, variable]!!
         val varName = variable.nameIdentifier!!
@@ -516,11 +547,11 @@ class KotlinWalker(
             varName.startOffset,
             varName.textLength,
             varName.text,
-            classOrFileName,
+            container,
             method.getNameMaybeLambda(),
             methodDescriptor.computeJvmDescriptor(withName = false),
             index,
-            varDescriptor.type.classId.jvmName()
+            varDescriptor.type.classId.jvmName(true)
         )
     }
 
@@ -603,8 +634,14 @@ class KotlinWalker(
         return "lambda\$$number"
     }
 
-    fun getContainingClassOrFile(descriptor: DeclarationDescriptor): String {
-        val sequence = generateSequence(descriptor) { it.containingDeclaration }
+    @Suppress("NAME_SHADOWING")
+    fun getContainingClassOrFile(descriptor: CallableDescriptor, useRoot: Boolean = false): String {
+        val descriptor = if (useRoot) {
+            descriptor.overriddenTreeUniqueAsSequence(false).last()
+        } else {
+            descriptor
+        }
+        val sequence = generateSequence(descriptor as DeclarationDescriptor) { it.containingDeclaration }
         val container = sequence.find { it is ClassOrPackageFragmentDescriptor }!!
 
         return when (container) {
@@ -630,30 +667,54 @@ class KotlinWalker(
     fun FqName.joinSlash() = pathSegments().joinToString("/")
 
     val KotlinType.classId: ClassId
-        get() = ClassId(
-            constructor.declarationDescriptor!!.containingPackage()!!,
-            constructor.declarationDescriptor!!.name
-        )
+        get() {
+            val declaration = constructor.declarationDescriptor!! as ClassDescriptor
+            return ClassId(
+                declaration.containingPackage()!!,
+                declaration.fqNameSafe,
+                declaration.visibility.delegate == Visibilities.Local
+            )
+        }
 
-    fun KtFunction.getNameMaybeLambda(): String {
-        return if (name == "<anonymous>") {
-            var lambdaName = parent.getUserData(lambdaName)
-            return if (lambdaName == null) {
-                lambdaName = (parent as KtLambdaExpression).getJvmName()
-                parent.putUserData(this@KotlinWalker.lambdaName, lambdaName)
-                lambdaName
-            } else lambdaName
-        } else name!!
+    private fun KtDeclarationWithBody.getNameMaybeLambda(): String {
+        return when(this) {
+            is KtFunction -> {
+                if (nameAsName!!.isAnonymous) {
+                    var lambdaName = parent.getUserData(lambdaName)
+                    return if (lambdaName == null) {
+                        lambdaName = (parent as KtLambdaExpression).getJvmName()
+                        parent.putUserData(this@KotlinWalker.lambdaName, lambdaName)
+                        lambdaName
+                    } else lambdaName
+                } else name!!
+            }
+            is KtPropertyAccessor -> {
+                namePlaceholder.text
+            }
+            else -> {
+                throw IllegalStateException("Unknown declaration type $text (${this::class.qualifiedName}")
+            }
+        }
     }
 
-    fun ClassId.jvmName(): String {
+    private fun ClassId.jvmName(isBinaryName: Boolean = false): String {
         val relativePath = buildString {
             relativeClassName.pathSegments().forEachIndexed { index, name ->
                 if (index != 0) append('$')
                 append(name.asString())
             }
         }
-        return packageFqName.joinSlash() + "/$relativePath"
+        val toReturn = if (packageFqName.isRoot) {
+            relativePath
+        }else {
+            packageFqName.joinSlash() + "/$relativePath"
+        }
+
+        return if (isBinaryName) {
+            "L$toReturn;"
+        } else {
+            toReturn
+        }
     }
 
     fun KtBlockExpression.localVariablesAndParams(): List<KtValVarKeywordOwner> {
@@ -679,10 +740,6 @@ class KotlinWalker(
         return toReturn
     }
 
-    private fun internalFileName(element: KtFile): String {
-        return element.packageFqName.joinSlash() + "/<top-level>"
-    }
-
     private var handled = false
 }
 
@@ -699,131 +756,7 @@ class KotlinWalker(
 // StructureEntry defines what can be StructureEntry, it's things like method, class, etc...
 // I was thinking of somehow using that system to define property function of val/var
 // But it seems impossible
+// Well it's not an important element of range map, so it's fine to not define another entry
 
 // In original srg2source, BodyDeclaration is for everything that can have body
 // subclass, functions, etc
-
-/**
- * KtFile
- *  KtPackageDirective
- *  KtImportList
- *  PsiWhiteSpace
- *  KtClass
- * */
-
-/**
- * FOR
- * BODY
- * BLOCK
- */
-/*
-        @Override public boolean visit(AnnotationTypeDeclaration       node) { return process(node); }
-        @Override public boolean visit(AnnotationTypeMemberDeclaration node) { return true; }
-        @Override public boolean visit(AnonymousClassDeclaration       node) { return process(node); }
-        @Override public boolean visit(ArrayAccess                     node) { return true; }
-        @Override public boolean visit(ArrayCreation                   node) { return true; }
-        @Override public boolean visit(ArrayInitializer                node) { return true; }
-        @Override public boolean visit(ArrayType                       node) { return true; }
-        @Override public boolean visit(AssertStatement                 node) { return true; }
-        @Override public boolean visit(Assignment                      node) { return true; }
-        - @Override public boolean visit(Block                           node) { return true; }
-        - @Override public boolean visit(BlockComment                    node) { return true; }
-        @Override public boolean visit(BooleanLiteral                  node) { return true; }
-        - @Override public boolean visit(BreakStatement                  node) { return process(node); }
-        @Override public boolean visit(CaseDefaultExpression           node) { return true; }
-        @Override public boolean visit(CastExpression                  node) { return true; }
-        @Override public boolean visit(CatchClause                     node) { return true; }
-        @Override public boolean visit(CharacterLiteral                node) { return true; }
-        @Override public boolean visit(ClassInstanceCreation           node) { return process(node); }
-        @Override public boolean visit(ConditionalExpression           node) { return true; }
-        @Override public boolean visit(ConstructorInvocation           node) { return true; }
-        @Override public boolean visit(ContinueStatement               node) { return process(node); }
-        @Override public boolean visit(CompilationUnit                 node) { return true; }
-        @Override public boolean visit(CreationReference               node) { return true; }
-        @Override public boolean visit(Dimension                       node) { return true; }
-        @Override public boolean visit(DoStatement                     node) { return true; }
-        @Override public boolean visit(EmptyStatement                  node) { return true; }
-        - @Override public boolean visit(EnhancedForStatement            node) { return true; } There is only one for in kotlin
-        @Override public boolean visit(EnumConstantDeclaration         node) { return true; }
-        @Override public boolean visit(EnumDeclaration                 node) { return process(node); }
-        @Override public boolean visit(ExportsDirective                node) { return true; }
-        @Override public boolean visit(ExpressionMethodReference       node) { return true; }
-        @Override public boolean visit(ExpressionStatement             node) { return true; }
-        @Override public boolean visit(FieldAccess                     node) { return true; }
-        @Override public boolean visit(FieldDeclaration                node) { return true; }
-        - @Override public boolean visit(ForStatement                    node) { return true; }
-        @Override public boolean visit(GuardedPattern                  node) { return true; }
-        @Override public boolean visit(IfStatement                     node) { return true; }
-        - @Override public boolean visit(ImportDeclaration               node) { return process(node); }
-        @Override public boolean visit(InfixExpression                 node) { return true; }
-        @Override public boolean visit(Initializer                     node) { return process(node); }
-        @Override public boolean visit(InstanceofExpression            node) { return true; }
-        @Override public boolean visit(PatternInstanceofExpression     node) { return true; }
-        @Override public boolean visit(IntersectionType                node) { return true; }
-        - @Override public boolean visit(Javadoc                         node) { return true; }
-        @Override public boolean visit(LabeledStatement                node) { return process(node); }
-        @Override public boolean visit(LambdaExpression                node) { return process(node); }
-        - @Override public boolean visit(LineComment                     node) { return true; }
-        @Override public boolean visit(MarkerAnnotation                node) { return process(node); }
-        @Override public boolean visit(MethodDeclaration               node) { return process(node); }
-        @Override public boolean visit(MethodInvocation                node) { return true; }
-        @Override public boolean visit(MemberRef                       node) { return true; }
-        @Override public boolean visit(MemberValuePair                 node) { return true; }
-        @Override public boolean visit(MethodRef                       node) { return true; }
-        @Override public boolean visit(MethodRefParameter              node) { return true; }
-        @Override public boolean visit(Modifier                        node) { return true; }
-        @Override public boolean visit(ModuleDeclaration               node) { return true; }
-        @Override public boolean visit(ModuleModifier                  node) { return true; }
-        @Override public boolean visit(ModuleQualifiedName             node) { return true; }
-        @Override public boolean visit(NameQualifiedType               node) { return true; }
-        @Override public boolean visit(NormalAnnotation                node) { return process(node); }
-        @Override public boolean visit(NullLiteral                     node) { return true; }
-        @Override public boolean visit(NullPattern                     node) { return true; }
-        @Override public boolean visit(NumberLiteral                   node) { return true; }
-        @Override public boolean visit(OpensDirective                  node) { return true; }
-        @Override public boolean visit(PackageDeclaration              node) { return process(node); }
-        @Override public boolean visit(ParameterizedType               node) { return true; }
-        @Override public boolean visit(ParenthesizedExpression         node) { return true; }
-        @Override public boolean visit(PostfixExpression               node) { return true; }
-        @Override public boolean visit(PrefixExpression                node) { return true; }
-        @Override public boolean visit(PrimitiveType                   node) { return true; }
-        @Override public boolean visit(ProvidesDirective               node) { return true; }
-        @Override public boolean visit(QualifiedName                   node) { return process(node); }
-        @Override public boolean visit(QualifiedType                   node) { return true; }
-        @Override public boolean visit(RequiresDirective               node) { return true; }
-        @Override public boolean visit(RecordDeclaration               node) { return process(node); }
-        @Override public boolean visit(ReturnStatement                 node) { return true; }
-        @Override public boolean visit(SimpleName                      node) { return process(node); }
-        @Override public boolean visit(SimpleType                      node) { return true; }
-        @Override public boolean visit(SingleMemberAnnotation          node) { return process(node); }
-        @Override public boolean visit(SingleVariableDeclaration       node) { return process(node); }
-        - @Override public boolean visit(StringLiteral                   node) { return true; }
-        @Override public boolean visit(SuperConstructorInvocation      node) { return true; }
-        @Override public boolean visit(SuperFieldAccess                node) { return true; }
-        @Override public boolean visit(SuperMethodInvocation           node) { return true; }
-        @Override public boolean visit(SuperMethodReference            node) { return true; }
-        @Override public boolean visit(SwitchCase                      node) { return true; }
-        @Override public boolean visit(SwitchExpression                node) { return true; }
-        @Override public boolean visit(SwitchStatement                 node) { return true; }
-        @Override public boolean visit(SynchronizedStatement           node) { return true; }
-        @Override public boolean visit(TagElement                      node) { return true; }
-        @Override public boolean visit(TextBlock                       node) { return true; }
-        @Override public boolean visit(TextElement                     node) { return true; }
-        @Override public boolean visit(ThisExpression                  node) { return true; }
-        @Override public boolean visit(ThrowStatement                  node) { return true; }
-        @Override public boolean visit(TryStatement                    node) { return true; }
-        @Override public boolean visit(TypeDeclaration                 node) { return process(node); }
-        @Override public boolean visit(TypeDeclarationStatement        node) { return true; }
-        @Override public boolean visit(TypeLiteral                     node) { return true; }
-        @Override public boolean visit(TypeMethodReference             node) { return true; }
-        @Override public boolean visit(TypeParameter                   node) { return true; }
-        @Override public boolean visit(TypePattern                     node) { return true; }
-        @Override public boolean visit(VariableDeclarationExpression   node) { return true; }
-        @Override public boolean visit(VariableDeclarationFragment     node) { return process(node); }
-        @Override public boolean visit(VariableDeclarationStatement    node) { return true; }
-        @Override public boolean visit(UnionType                       node) { return true; }
-        @Override public boolean visit(UsesDirective                   node) { return true; }
-        @Override public boolean visit(WhileStatement                  node) { return true; }
-        @Override public boolean visit(WildcardType                    node) { return true; }
-        @Override public boolean visit(YieldStatement                  node) { return true; }
- */

@@ -1,5 +1,3 @@
-package p;
-
 public enum EnumTest {
     A("A"),
     B("B"),
