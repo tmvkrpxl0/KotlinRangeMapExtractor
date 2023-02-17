@@ -1,4 +1,8 @@
 public class JavaInheritanceTestSuper {
+    /**
+     * t
+     * @param a
+     */
     public void run(int a) {
         JavaInheritanceTestOverriding overriding = new JavaInheritanceTestOverriding();
         JavaInheritanceTestNonOverriding nonOverriding = new JavaInheritanceTestNonOverriding();
@@ -11,7 +15,7 @@ public class JavaInheritanceTestSuper {
 
         @Override
         public void run(int a) {
-            System.out.println("a");
+            java.lang.System.out.println("a");
             super.run(a);
         }
     }

@@ -1,15 +1,9 @@
-import EnumTest.*
+enum class EnumTest (val a: String) {
+    A("A"),
+    B("B"),
+    C("C");
 
-enum class EnumTest {
-    A {
-        fun a() {
-
-        }
-    },
-    B {
-        fun b() {
-
-        }
-    },
-    C
+    init {
+        System.out.println("asdf")
+    }
 }

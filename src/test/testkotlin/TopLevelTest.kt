@@ -48,6 +48,6 @@ fun test() {
 }
 
 @kotlin.jvm.JvmName("test")
-fun testQulifier() {
+fun testQualifier() {
 
 }

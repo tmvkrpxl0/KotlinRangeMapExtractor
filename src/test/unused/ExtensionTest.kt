@@ -7,7 +7,7 @@ fun BaseClass.a() {
     "asdf"
 }
 
-var BaseClass.integer: Int
+var BaseClass.extended: Int
     get() = 0
     set(value) {
         println(value)
@@ -15,6 +15,6 @@ var BaseClass.integer: Int
 
 fun extensionTest() {
     val b = BaseClass()
-    println(b.integer)
-    b.integer = 123
+    println(b.extended)
+    b.extended = 123
 }
