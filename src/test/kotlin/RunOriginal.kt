@@ -23,9 +23,9 @@ class RunOriginal {
     @Test
     fun applyKotlin() {
         RangeApplyMain.main(arrayOf(
-            "--in", "src/test/testkotlin",
-            "--out", "src/test/toanalyze",
-            "--map", "/home/tmvkrpxl0/.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config/1.19.2-20220805.130853/srg_to_parchment_BLEEDING-SNAPSHOT-1.19.3.tsrg",
+            "--in", "/home/tmvkrpxl0/IdeaProjects/srg_test/src/main/kotlin",
+            "--out", "/home/tmvkrpxl0/IdeaProjects/srg_test/src/main/kotlin",
+            "--map", "/home/tmvkrpxl0/.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config/1.19.3-20221207.122022/srg_to_official_1.19.3.tsrg",
             "--range", "./ktoutput",
         ))
     }
@@ -35,7 +35,7 @@ class RunOriginal {
         RangeApplyMain.main(arrayOf(
             "--in", "src/test/testjava",
             "--out", "src/test/toanalyze",
-            "--map", "/home/tmvkrpxl0/.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config/1.19.2-20220805.130853/srg_to_parchment_BLEEDING-SNAPSHOT-1.19.3.tsrg",
+            "--map", "/home/tmvkrpxl0/.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config/1.19.3-20221207.122022/srg_to_official_1.19.3.tsrg",
             "--range", "./output",
         ))
     }

@@ -6,7 +6,7 @@ import java.nio.file.Paths
 
 fun main() {
     val ramOutput = File("ktoutput").printWriter()
-    val folder = FolderSupplier.create(Paths.get("src/test/testkotlin"), StandardCharsets.UTF_8)
+    val folder = FolderSupplier.create(Paths.get("/home/tmvkrpxl0/IdeaProjects/tcombat_forge/src/main/kotlin"), StandardCharsets.UTF_8)
     val extractor = KotlinRangeExtractor(
         inputs=listOf(folder),
         output=ramOutput,

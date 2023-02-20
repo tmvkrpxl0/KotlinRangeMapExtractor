@@ -17,6 +17,7 @@ class KotlinRangeExtractor(
     inputs: List<InputSupplier>,
     var output: PrintWriter? = null,
     val logWarnings: Boolean = false,
+    val fullPower: Boolean = false,
     private val jvmVersion: SourceVersion
 ) : ConfLogger<KotlinRangeExtractor>() {
     private val input = if (inputs.size == 1) inputs.first() else ChainedInputSupplier(inputs)
@@ -84,7 +85,7 @@ class KotlinRangeExtractor(
 
                 log("start Processing \"$path\" md5: $md5")
 
-                ktFile.accept(KotlinWalker(builder, this, analysisResult))
+                ktFile.accept(KotlinWalker(builder, this, analysisResult, compatibility=!fullPower))
 
                 val rangeMap = builder.build()
                 if (output != null) {
