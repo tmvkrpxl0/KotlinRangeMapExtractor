@@ -7,6 +7,11 @@ fun BaseClass.a() {
     "asdf"
 }
 
+var a: Int = 0
+    get() {
+        return field++
+    }
+
 var BaseClass.extended: Int
     get() = 0
     set(value) {

@@ -1,4 +1,5 @@
 import net.minecraftforge.srg2source.range.RangeMapBuilder
+import net.minecraftforge.srg2source.util.io.ConfLogger
 import org.jetbrains.kotlin.analyzer.AnalysisResult
 import org.jetbrains.kotlin.backend.common.serialization.mangle.ir.isAnonymous
 import org.jetbrains.kotlin.com.intellij.openapi.util.Key
@@ -8,63 +9,49 @@ import org.jetbrains.kotlin.com.intellij.psi.PsiWhiteSpace
 import org.jetbrains.kotlin.com.intellij.psi.impl.source.tree.LeafPsiElement
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.impl.LocalVariableDescriptor
+import org.jetbrains.kotlin.descriptors.impl.SyntheticFieldDescriptor
 import org.jetbrains.kotlin.fileClasses.javaFileFacadeFqName
 import org.jetbrains.kotlin.kdoc.psi.api.KDocElement
+import org.jetbrains.kotlin.kdoc.psi.impl.KDocLink
+import org.jetbrains.kotlin.kdoc.psi.impl.KDocName
+import org.jetbrains.kotlin.lexer.KtTokens
+import org.jetbrains.kotlin.load.java.descriptors.JavaClassConstructorDescriptor
 import org.jetbrains.kotlin.load.java.descriptors.getImplClassNameForDeserialized
-import org.jetbrains.kotlin.load.kotlin.computeJvmDescriptor
-import org.jetbrains.kotlin.load.kotlin.toSourceElement
+import org.jetbrains.kotlin.load.kotlin.*
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.*
 import org.jetbrains.kotlin.psi.stubs.elements.KtNameReferenceExpressionElementType
+import org.jetbrains.kotlin.psi.synthetics.findClassDescriptor
 import org.jetbrains.kotlin.resolve.BindingContext
-import org.jetbrains.kotlin.resolve.descriptorUtil.classId
-import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameSafe
-import org.jetbrains.kotlin.resolve.descriptorUtil.overriddenTreeUniqueAsSequence
+import org.jetbrains.kotlin.resolve.descriptorUtil.*
+import org.jetbrains.kotlin.resolve.sam.SamConstructorDescriptor
 import org.jetbrains.kotlin.resolve.source.PsiSourceFile
 import org.jetbrains.kotlin.resolve.source.getPsi
 import org.jetbrains.kotlin.serialization.deserialization.descriptors.DescriptorWithContainerSource
+import org.jetbrains.kotlin.synthetic.SyntheticJavaPropertyDescriptor
 import org.jetbrains.kotlin.types.KotlinType
-import java.io.PrintStream
+import org.jetbrains.kotlin.types.error.ErrorClassDescriptor
+import org.jetbrains.kotlin.types.typeUtil.*
 import kotlin.math.absoluteValue
 
-// TODO Properly compute lambda names
+
 class KotlinWalker(
     private val builder: RangeMapBuilder,
-    private val errorLogger: PrintStream,
+    private val logger: ConfLogger<*>,
     result: AnalysisResult
 ) : KtVisitorVoid() {
     private val bindingContext = result.bindingContext
     private val ignoreChildren = Key<KotlinWalker>("ignoreChildren")
-    private val hasRecorded = Key<KotlinWalker>("hasRecorded")
     private val lambdaName = Key<String>("lambdaName")
     private val localVarParams = Key<List<PsiElement>>("localVars")
-
-    /*val analyzer = serviceResolver.componentProvider.get<LazyTopDownAnalyzer>()
-    val resolveSession = serviceResolver.componentProvider.get<ResolveSession>()
-    val expressionTypes = serviceResolver.componentProvider.get<ExpressionTypingServices>()
-    val localVarResolver = serviceResolver.componentProvider.get<LocalVariableResolver>()
-    val typeChecker = serviceResolver.componentProvider.get<KotlinTypeChecker>()
-    val overrides = serviceResolver.componentProvider.get<OverrideResolver>()
-    val types = serviceResolver.componentProvider.get<TypeResolver>()
-    val bindingTrace = serviceResolver.componentProvider.get<BindingTraceContext>()
-    val dataflows = serviceResolver.componentProvider.get<DataFlowValueFactory>()
-    val declarations = serviceResolver.componentProvider.get<DeclarationResolver>()
-    val expressionTypeVisitor = serviceResolver.componentProvider.get<ExpressionTypingVisitor>()
-    val descriptions = serviceResolver.componentProvider.get<DescriptorResolver>()
-    val expressionTypeDispatcher = serviceResolver.componentProvider.get<ExpressionTypingVisitorDispatcher>()
-    val builtIns = serviceResolver.componentProvider.get<KotlinBuiltIns>()
-    val lazyDeclarations = serviceResolver.componentProvider.get<LazyDeclarationResolver>()
-    val localDescriptions = serviceResolver.componentProvider.get<LocalDescriptorResolver>()
-    val functions = serviceResolver.componentProvider.get<FunctionDescriptorResolver>()
-    val annotations = serviceResolver.componentProvider.get<AnnotationResolver>()*/
 
     override fun visitPackageDirective(directive: KtPackageDirective) {
         handled = true
         if (!directive.isRoot) {
-            directive.putUserData(hasRecorded, this)
-            builder.addPackageReference(directive.startOffset, directive.textLength, directive.fqName.asString())
+            val name = directive.packageNameExpression!!
+            builder.addPackageReference(name.startOffset, name.textLength, name.text)
         }
         return super.visitPackageDirective(directive)
     }
@@ -78,10 +65,11 @@ class KotlinWalker(
         if (earlyReturn) return super.visitParameter(parameter)
 
         val name = parameter.nameIdentifier!!
-        val descriptor = bindingContext[BindingContext.DECLARATION_TO_DESCRIPTOR, parameter]!! as ValueParameterDescriptor
+        val descriptor =
+            bindingContext[BindingContext.DECLARATION_TO_DESCRIPTOR, parameter]!! as DeclarationDescriptorWithSource
         val methodDescriptor = descriptor.containingDeclaration as FunctionDescriptor
 
-        val container = getContainerInternalName(descriptor)
+        val container = tryRun { getContainerInternalName(descriptor) } ?: return
         val method = methodDescriptor.source.getPsi()!! as KtDeclarationWithBody
 
         builder.addParameterReference(
@@ -107,36 +95,90 @@ class KotlinWalker(
 
         if (descriptor is PackageViewDescriptor) earlyReturn = true
         if (descriptor is PackageFragmentDescriptor) earlyReturn = true
+        if (descriptor is SyntheticFieldDescriptor) earlyReturn = true
         if (expression is KtOperationReferenceExpression && descriptor == null) {
-            println("Ignoring operator expression ${expression.operationSignTokenType} in ${expression.context?.text}")
             earlyReturn = true
         }
 
         if (earlyReturn) return super.visitSimpleNameExpression(expression)
-        descriptor!!
+        if (descriptor == null) {
+            logger.error("Unresolved expression: ${expression.text} at ${expression.startOffset} in ${expression.containingKtFile.name}")
+            return
+        }
 
         fun onVariableReference() {
             descriptor as VariableDescriptor
 
-            val container = getContainerInternalName(descriptor)
+            val container = tryRun { getContainerInternalName(descriptor) } ?: return
+
             when (descriptor) {
-                is LocalVariableDescriptor, is ValueParameterDescriptor -> {
+                is LocalVariableDescriptor -> {
+                    val local = descriptor.source.getPsi()!! as KtValVarKeywordOwner
+                    val method = local.parents.first { it is KtFunction || it is KtClassInitializer }
+
+                    val arguments =
+                        if (method is KtFunction) {
+                            val methodDescriptor = method.descriptor
+
+                            val varsParams = method.bodyBlockExpression!!.localVariablesAndParams(methodDescriptor)
+                            val index = varsParams.indexOf(local)
+                            val methodName = method.getNameMaybeLambda(methodDescriptor)
+                            VariableReferenceArguments(
+                                container,
+                                methodName,
+                                methodDescriptor.computeJvmDescriptor(withName = false),
+                                index
+                            )
+                        } else {
+                            method as KtClassInitializer
+                            val index = method.localVariablesAndParams().indexOf(local)
+                            val primaryDescriptor = method
+                                .containingClass()
+                                ?.primaryConstructor
+                                ?.descriptor
+                                ?.computeJvmDescriptor(withName = false) ?: "()V"
+
+                            VariableReferenceArguments(
+                                container,
+                                "<init>",
+                                primaryDescriptor,
+                                index
+                            )
+                        }
+
+                    builder.addLocalVariableReference(
+                        expression.startOffset,
+                        expression.textLength,
+                        expression.text,
+                        arguments.methodContainer,
+                        arguments.methodName,
+                        arguments.methodDescriptor,
+                        arguments.varIndex,
+                        tryRun { descriptor.type.classId.jvmName } ?: return
+                    )
+                }
+
+                is ValueParameterDescriptor -> {
                     val parentDescriptor = descriptor.containingDeclaration as FunctionDescriptor
-                    val parentMethod = (parentDescriptor.toSourceElement.getPsi()!!) as KtDeclarationWithBody
-
-                    val index = if (descriptor is ValueParameterDescriptor) {
-                        descriptor.index
+                    if (parentDescriptor is JavaClassConstructorDescriptor && parentDescriptor.isAnnotationConstructor()) {
+                        builder.addMethodReference(
+                            expression.startOffset,
+                            expression.textLength,
+                            expression.text,
+                            container,
+                            parentDescriptor.name.asString(),
+                            "()" + descriptor.type.classId.jvmName
+                        )
                     } else {
-                        val local = descriptor.source.getPsi()!! as KtValVarKeywordOwner
-                        val varsParams = parentMethod.bodyBlockExpression!!.localVariablesAndParams(parentDescriptor)
-                        val index = varsParams.indexOf(local)
-                        require(index != -1)
-                        index
-                    }
+                        val parentName = if (parentDescriptor is JavaClassConstructorDescriptor) {
+                            parentDescriptor.name.asString()
+                        } else {
+                            val parentMethod = (parentDescriptor.source.getPsi()!!) as KtDeclarationWithBody
+                            parentMethod.getNameMaybeLambda(parentDescriptor)
+                        }
 
-                    val parentName = parentMethod.getNameMaybeLambda(parentDescriptor)
+                        val index = descriptor.index
 
-                    if (descriptor is ValueParameterDescriptor) {
                         builder.addParameterReference(
                             expression.startOffset,
                             expression.textLength,
@@ -146,18 +188,25 @@ class KotlinWalker(
                             parentDescriptor.computeJvmDescriptor(withName = false),
                             index
                         )
-                    } else {
-                        builder.addLocalVariableReference(
-                            expression.startOffset,
-                            expression.textLength,
-                            expression.text,
-                            container,
-                            parentName,
-                            parentDescriptor.computeJvmDescriptor(withName = false),
-                            index,
-                            descriptor.type.classId.jvmName(true)
-                        )
                     }
+                }
+
+                is SyntheticJavaPropertyDescriptor -> {
+                    // Only direct assignment will solely reference setter, any other operations that may invoke setter
+                    // will also invoke getter
+                    val isSetter = (expression.parent as? KtUnaryExpression)?.operationToken == KtTokens.EQ
+                    val targetMethod = if (isSetter) descriptor.setMethod!! else descriptor.getMethod
+
+                    val name = targetMethod.name.asString()
+                    val javaDescriptor = targetMethod.computeJvmDescriptor(withName = false)
+                    builder.addMethodReference(
+                        expression.startOffset,
+                        expression.textLength,
+                        expression.text,
+                        container,
+                        name,
+                        javaDescriptor
+                    )
                 }
 
                 is PropertyDescriptor -> {
@@ -168,9 +217,10 @@ class KotlinWalker(
                         container
                     )
                 }
+
                 else -> {
                     handled = false
-                    errorLogger.println("UNHANDLED NAME EXPRESSION ${expression.text}")
+                    logger.logger.println("UNHANDLED NAME EXPRESSION ${expression.text}")
                 }
             }
         }
@@ -181,18 +231,28 @@ class KotlinWalker(
          */
         fun onClassReference() {
             descriptor as ClassDescriptor
+            if (descriptor is ErrorClassDescriptor) {
+                throw RuntimeException("Unable to resolve referenced class of $expression at ${expression.startOffset} in ${expression.containingKtFile.name}")
+            }
+
             if (expression.context is KtSuperExpression) return
+            if (expression.context is KtThisExpression) return
 
-            val qualified = expression.getQualifiedElement() as? KtQualifiedExpression
+            val reference = expression.getQualifiedElement()
 
-            val toAdd = qualified ?: expression
+            val isQualified = (reference as? KtUserType)?.qualifier != null || reference is KtDotQualifiedExpression
+
+            val start = if (isQualified && descriptor.parents.firstOrNull() !is ClassDescriptor) reference.startOffset else expression.startOffset
+            val end = expression.endOffset
+            val length = end - start
+            val text = expression.containingKtFile.text.substring(start, end)
 
             builder.addClassReference(
-                toAdd.startOffset,
-                toAdd.textLength,
-                toAdd.text,
-                descriptor.classId!!.jvmName(),
-                qualified != null
+                start,
+                length,
+                text,
+                descriptor.classId!!.jvmName,
+                isQualified
             )
         }
 
@@ -203,14 +263,15 @@ class KotlinWalker(
          */
         fun onFunctionReference() {
             descriptor as FunctionDescriptor
+            if (descriptor.isOperator) return
 
-            val container = getContainerInternalName(descriptor, true)
+            val container = tryRun { getContainerInternalName(descriptor.findSuperRoot()) }
 
             if (descriptor is ConstructorDescriptor) {
                 val reference = expression.getQualifiedElement()
-                val isQualified = (reference as? KtUserType)?.qualifier != null
+                val isQualified = (reference as? KtUserType)?.qualifier != null || reference is KtQualifiedExpression
 
-                val start = reference.startOffset
+                val start = if (isQualified && descriptor.constructedClass.parents.firstOrNull() !is ClassDescriptor) reference.startOffset else expression.startOffset
                 val end = expression.endOffset
                 val length = end - start
                 val text = expression.containingKtFile.text.substring(start, end)
@@ -218,7 +279,7 @@ class KotlinWalker(
                     start,
                     length,
                     text,
-                    descriptor.constructedClass.classId!!.jvmName(),
+                    descriptor.constructedClass.classId!!.jvmName,
                     isQualified
                 )
             } else {
@@ -270,7 +331,7 @@ class KotlinWalker(
      */
     override fun visitNamedFunction(function: KtNamedFunction) {
         val descriptor = bindingContext[BindingContext.FUNCTION, function]!!
-        val container = getContainerInternalName(descriptor, true)
+        val container = tryRun { getContainerInternalName(descriptor.findSuperRoot()) }
         builder.addMethodDeclaration(
             function.startOffset,
             function.textLength,
@@ -318,7 +379,6 @@ class KotlinWalker(
         }
 
         function.putUserData(ignoreChildren, this)
-        function.putUserData(hasRecorded, this)
 
         handled = true
         super.visitNamedFunction(function)
@@ -331,7 +391,7 @@ class KotlinWalker(
         handled = true
         val enumClass = enumEntry.containingClass()!!
         val name = enumEntry.nameIdentifier!!
-        builder.addFieldReference(name.startOffset, name.textLength, name.text, enumClass.getClassId()!!.jvmName())
+        builder.addFieldReference(name.startOffset, name.textLength, name.text, enumClass.getClassId()!!.jvmName)
 
         if (enumEntry.body == null) return super.visitEnumEntry(enumEntry)
 
@@ -340,7 +400,7 @@ class KotlinWalker(
 
     override fun visitLambdaExpression(lambda: KtLambdaExpression) {
         val descriptor = bindingContext[BindingContext.FUNCTION, lambda.functionLiteral]!!
-        val name = lambda.putUserDataIfAbsent(lambdaName, lambda.getJvmName())
+        val name = lambda.putUserDataIfAbsent(lambdaName, lambda.generateJvmName())
 
         builder.addMethodDeclaration(
             lambda.startOffset,
@@ -367,7 +427,11 @@ class KotlinWalker(
     override fun visitClassOrObject(klass: KtClassOrObject) {
         if (klass is KtEnumEntry) return super.visitClassOrObject(klass)
 
-        val innerName = klass.getClassId()!!.jvmName()
+        val innerName = if (klass.getClassId() != null) {
+            klass.getClassId()!!.jvmName
+        } else {
+            getContainerInternalName(klass.findClassDescriptor(bindingContext)) + "\$${klass.text.hashCode()}"
+        }
 
         fun onClassLike() {
             // Modifiers in java: sealed, [access modifiers], final, static, abstract, non-sealed
@@ -411,7 +475,7 @@ class KotlinWalker(
             leftOver.remove(klass.primaryConstructor)
             leftOver.remove(klass.body)
             if (leftOver.isNotEmpty()) {
-                errorLogger.println("Warning: unvisited $leftOver")
+                logger.logger.println("Warning: unvisited $leftOver")
             }
         }
 
@@ -480,7 +544,7 @@ class KotlinWalker(
             leftOver.remove(klass.primaryConstructor)
             leftOver.remove(klass.body)
             if (leftOver.isNotEmpty()) {
-                errorLogger.println("Warning: unvisited $leftOver")
+                logger.logger.println("Warning: unvisited $leftOver")
             }
         }
 
@@ -509,7 +573,7 @@ class KotlinWalker(
             }
 
             else -> {
-                throw IllegalStateException("Unable to determine kind of class!")
+                throw RuntimeException("Unable to determine kind of class!")
             }
         }
 
@@ -520,35 +584,51 @@ class KotlinWalker(
 
     private fun onField(variable: KtVariableDeclaration) {
         val descriptor = bindingContext[BindingContext.VARIABLE, variable]!!
-        val container = getContainerInternalName(descriptor)
+        val container = tryRun { getContainerInternalName(descriptor) } ?: return
 
         val fieldName = variable.nameIdentifier!!
         builder.addFieldReference(fieldName.startOffset, fieldName.textLength, fieldName.text, container)
     }
 
     private fun onLocal(variable: KtVariableDeclaration) {
-        val method =
-            generateSequence<KtElement>(variable) { it.parent as KtElement }.find { it is KtFunction }!! as KtFunction
-        val methodDescriptor = bindingContext[BindingContext.FUNCTION, method]!!
-
-        val container = getContainerInternalName(methodDescriptor)
-
+        val method = variable.parents.first { it is KtFunction || it is KtClassInitializer }
         val varDescriptor = bindingContext[BindingContext.VARIABLE, variable]!!
         val varName = variable.nameIdentifier!!
+        val type = tryRun { varDescriptor.type.classId.jvmName } ?: return
 
-        val localVars = method.bodyBlockExpression!!.localVariablesAndParams(methodDescriptor)
+        val (container, name, descriptor, index) = if (method is KtClassInitializer) {
+            val result = method.analyze(variable)
 
-        val index = localVars.indexOf(variable)
+            VariableReferenceArguments(
+                result.container.classId!!.jvmName,
+                "<init>",
+                result.descriptor,
+                result.varIndex
+            )
+        } else {
+            method as KtFunction
+
+            val methodDescriptor = method.descriptor
+
+            val localVars = method.bodyBlockExpression!!.localVariablesAndParams(methodDescriptor as CallableDescriptor)
+
+            VariableReferenceArguments(
+                getContainerInternalName(methodDescriptor),
+                method.getNameMaybeLambda(methodDescriptor as CallableDescriptor),
+                methodDescriptor.computeJvmDescriptor(withName = false),
+                localVars.indexOf(variable)
+            )
+        }
 
         builder.addLocalVariableReference(
             varName.startOffset,
             varName.textLength,
             varName.text,
             container,
-            method.getNameMaybeLambda(methodDescriptor),
-            methodDescriptor.computeJvmDescriptor(withName = false),
+            name,
+            descriptor,
             index,
-            varDescriptor.type.classId.jvmName(true)
+            type
         )
     }
 
@@ -598,7 +678,7 @@ class KotlinWalker(
             initializer.startOffset,
             4,
             "init",
-            container.getClassId()!!.jvmName(),
+            container.getClassId()!!.jvmName,
             "<init>",
             descriptor
         )
@@ -637,10 +717,18 @@ class KotlinWalker(
             is KtAnnotationUseSiteTarget, is KtValueArgumentList, is KtValueArgument, is KtStringTemplateEntry,
             is KtStringTemplateExpression, is KtTypeReference, is KtUserType, is KtQualifiedExpression,
             is KtFunctionType, is KtParameterList, is KtTypeParameter, is KtModifierList,
-            is KtClassBody, is KtPrimaryConstructor, is KtDelegatedSuperTypeEntry, is KtCallExpression,
-            is KtBinaryExpression, is KtContainerNode, is KtReturnExpression, is KtForExpression,
+            is KtClassBody, is KtConstructor<*>, is KtDelegatedSuperTypeEntry, is KtCallExpression,
+            is KtOperationExpression, is KtContainerNode, is KtReturnExpression, is KtForExpression,
             is KtDestructuringDeclaration, is KtSuperExpression, is KtSuperTypeCallEntry,
-            is KtClassLiteralExpression, is KtInitializerList, is KtScriptInitializer -> {
+            is KtClassLiteralExpression, is KtInitializerList, is KtScriptInitializer, is KtCallableReferenceExpression,
+            is KtTypeProjection, is KtTypeArgumentList, is KtIfExpression, is KtThisExpression,
+            is KtArrayAccessExpression, is KtParenthesizedExpression, is KtConstructorDelegationCall,
+            is KtWhenCondition, is KtWhenExpression, is KtWhenEntry, is KtThrowExpression,
+            is KtCollectionLiteralExpression, is KtValueArgumentName, is KtPropertyDelegate,
+            is KtNullableType, is KtSuperTypeEntry, is KtObjectLiteralExpression,
+            is KDocLink, is KDocName, is KtConstructorDelegationReferenceExpression,
+            is KtContinueExpression, is KtWhileExpressionBase,
+            -> {
                 handled = true
             }
 
@@ -652,26 +740,49 @@ class KotlinWalker(
 
         if (!handled) {
             println("UNHANDLED ELEMENT: ${element.javaClass.simpleName}($element ${element.text})")
-        } else {
-            println("HANDLED ELEMENT: ${element.javaClass.simpleName}($element ${element.text})")
         }
         handled = false
 
         if (element.getUserData(ignoreChildren) == this) return
         element.acceptChildren(this)
     }
+    
+    private val ClassId.jvmName: String
+        get() {
+            val packageName = packageFqName.joinSlash()
+            val classPath = relativeClassName.pathSegments().joinToString("$")
+            return "$packageName/$classPath"
+        }
 
-    fun List<PsiElement>.visitAll(allowEmpty: Boolean = false) {
+    private fun List<PsiElement>.visitAll(allowEmpty: Boolean = false) {
         if (!allowEmpty && isEmpty()) {
             println("EMPTY!")
-            Throwable().printStackTrace(errorLogger)
+            Throwable().printStackTrace(logger.logger)
         }
         forEach {
             it.accept(this@KotlinWalker)
         }
     }
 
-    fun KtLambdaExpression.getJvmName(): String {
+    data class InitializerInfo(
+        val container: ClassDescriptor,
+        val descriptor: String,
+        val varIndex: Int
+    )
+
+    private fun KtClassInitializer.analyze(variable: KtValVarKeywordOwner): InitializerInfo {
+        val container = containingClassOrObject!!.findClassDescriptor(bindingContext)
+        val descriptor = containingClass()
+            ?.primaryConstructor
+            ?.let { bindingContext[BindingContext.CONSTRUCTOR, it]!!.computeJvmDescriptor(withName = false) }
+            ?: "()V"
+        val variables = localVariablesAndParams()
+        val index = variables.indexOf(variable)
+        require(index != -1)
+        return InitializerInfo(container, descriptor, index)
+    }
+
+    private fun KtLambdaExpression.generateJvmName(): String {
         val trace = generateSequence<KtElement>(this) {
             if (it is KtFile) return@generateSequence null
             it.parent as KtElement
@@ -682,54 +793,89 @@ class KotlinWalker(
         return "lambda\$$number"
     }
 
-    @Suppress("NAME_SHADOWING")
-    fun getContainerInternalName(descriptor: CallableDescriptor, useRootDeclaration: Boolean = false): String {
-        val descriptor = if (useRootDeclaration) {
-            descriptor.overriddenTreeUniqueAsSequence(false).last()
-        } else {
-            descriptor
-        }
-        val sequence = generateSequence(descriptor as DeclarationDescriptor) { it.containingDeclaration }.toList()
-        val (index, container) = sequence.withIndex().find { it.value is ClassOrPackageFragmentDescriptor }!!
-
-        return when (container) {
-            is PackageFragmentDescriptor -> {
-                if (descriptor.source == SourceElement.NO_SOURCE) {
-                    when (descriptor) {
-                        is DescriptorWithContainerSource -> {
-                            descriptor.getImplClassNameForDeserialized()!!.internalName
-                        }
-                        else -> {
-                            (sequence[index-1].toSourceElement.getPsi()!!.parent as KtFile).javaFileFacadeFqName.joinSlash()
-                        }
-                    }
-                } else {
-                    val file = (descriptor.source.containingFile as PsiSourceFile).psiFile as KtFile
-
-                    file.javaFileFacadeFqName.joinSlash()
-                }
-            }
-
-            is ClassDescriptor -> {
-                container.classId!!.jvmName()
-            }
-
-            else -> {
-                throw IllegalStateException("Unable to parse owner!")
-            }
-        }
+    private fun CallableDescriptor.findSuperRoot(): CallableDescriptor {
+        return overriddenTreeUniqueAsSequence(false).last()
     }
 
-    fun FqName.joinSlash() = pathSegments().joinToString("/")
+    @Suppress("NAME_SHADOWING")
+    private fun getContainerInternalName(descriptor: DeclarationDescriptorWithSource): String {
+        if (descriptor is SamConstructorDescriptor) {
+            return descriptor.baseDescriptorForSynthetic.classId!!.jvmName
+        }
 
-    val KotlinType.classId: ClassId
+        val descriptor: DeclarationDescriptorWithSource = when (descriptor) {
+            is SyntheticJavaPropertyDescriptor -> descriptor.getMethod
+            else -> descriptor
+        }
+
+        val sequence = descriptor.parents.toList()
+        val searchResult = sequence.withIndex().find { it.value is ClassOrPackageFragmentDescriptor }
+            ?: throw NoSuchElementException("Unable to find container for descriptor: $descriptor")
+        val (index, container) = searchResult
+        val immediateChild = sequence.getOrNull(index - 1)
+
+        if (container is ClassDescriptor) {
+            if (container is ErrorClassDescriptor) {
+                throw NoSuchElementException("Container of descriptor $descriptor is unresolved!")
+            }
+            if (container.classId == null) {
+                return getContainerInternalName(container) + "\$${container.toSourceElement.getPsi()!!.text.hashCode()}"
+            }
+
+            val typeId = container.classId!!
+            return typeId.jvmName
+        }
+
+        if (container is PackageFragmentDescriptor) {
+            if (descriptor.source != SourceElement.NO_SOURCE) {
+                return ((descriptor.source.containingFile as PsiSourceFile).psiFile as KtFile).javaFileFacadeFqName.joinSlash()
+            }
+            if (immediateChild?.toSourceElement != null && immediateChild.toSourceElement != SourceElement.NO_SOURCE) {
+                return ((immediateChild.toSourceElement.containingFile as PsiSourceFile).psiFile as KtFile).javaFileFacadeFqName.joinSlash()
+            }
+
+            if (descriptor is DescriptorWithContainerSource) {
+                return descriptor.getImplClassNameForDeserialized()?.internalName
+                    ?: (descriptor.containingPackage()!!.joinSlash() + "/<built-in>")
+            }
+
+            if (immediateChild is DescriptorWithContainerSource) {
+                return immediateChild.getImplClassNameForDeserialized()?.internalName
+                    ?: (immediateChild.containingPackage()!!.joinSlash() + "/<built-in>")
+            }
+        }
+
+        throw RuntimeException("Unable to parse owner!")
+    }
+
+    private fun FqName.joinSlash() = pathSegments().joinToString("/")
+
+    private val KtFunction.descriptor: FunctionDescriptor
+        get() = if (this is KtConstructor<*>) {
+            bindingContext[BindingContext.CONSTRUCTOR, this]!!
+        } else {
+            bindingContext[BindingContext.FUNCTION, this]!!
+        }
+    
+
+    private val KotlinType.classId: ClassId
         get() {
-            val declaration = constructor.declarationDescriptor!! as ClassDescriptor
-            return ClassId(
-                declaration.containingPackage()!!,
-                declaration.fqNameSafe,
-                declaration.visibility.delegate == Visibilities.Local
-            )
+            if (this.containsError()) {
+                throw RuntimeException("Unable to resolve type $this")
+            }
+
+            return when (val declaration = constructor.declarationDescriptor) {
+                is TypeParameterDescriptor -> {
+                    val bound = declaration.representativeUpperBound
+                    bound.supertypes().first().classId
+                }
+                is ClassDescriptor -> {
+                    declaration.classId!!
+                }
+                else -> {
+                    throw RuntimeException("Unrecognized declaration descriptor $declaration for type $this")
+                }
+            }
         }
 
     private fun KtDeclarationWithBody.getNameMaybeLambda(descriptor: CallableDescriptor): String {
@@ -737,56 +883,31 @@ class KotlinWalker(
 
         if (!isAnonymous) return descriptor.name.asString()
 
-        return when(this) {
+        return when (this) {
             is KtFunction -> {
                 var lambdaName = parent.getUserData(lambdaName)
                 if (lambdaName == null) {
-                    lambdaName = (parent as KtLambdaExpression).getJvmName()
+                    lambdaName = (parent as KtLambdaExpression).generateJvmName()
                     parent.putUserData(this@KotlinWalker.lambdaName, lambdaName)
                 }
 
                 return lambdaName
             }
+
             is KtPropertyAccessor -> {
                 namePlaceholder.text
             }
+
             else -> {
-                throw IllegalStateException("Unknown declaration type $text (${this::class.qualifiedName}")
+                throw RuntimeException("Unknown declaration type $text (${this::class.qualifiedName}")
             }
         }
     }
 
-    private fun ClassId.jvmName(isBinaryName: Boolean = false): String {
-        val relativePath = buildString {
-            relativeClassName.pathSegments().forEachIndexed { index, name ->
-                if (index != 0) append('$')
-                append(name.asString())
-            }
-        }
-        val toReturn = if (packageFqName.isRoot) {
-            relativePath
-        }else {
-            packageFqName.joinSlash() + "/$relativePath"
-        }
-
-        return if (isBinaryName) {
-            "L$toReturn;"
-        } else {
-            toReturn
-        }
-    }
-
-    fun KtBlockExpression.localVariablesAndParams(descriptor: CallableDescriptor): List<PsiElement> {
-        if (getUserData(localVarParams) != null) return getUserData(localVarParams)!!
-
-        val parent = parent!! as KtFunction
+    private fun collectLocalVars(element: PsiElement, ignore: List<PsiElement>): List<PsiElement> {
         val toReturn = mutableListOf<PsiElement>()
-        toReturn.addAll(parent.valueParameters.toMutableList())
-        if (descriptor.valueParameters.isNotEmpty() && toReturn.isEmpty()) {
-            toReturn += LeafPsiElement(KtNameReferenceExpressionElementType("it"), "it")
-        }
 
-        val localVarCollector = object: KtVisitorVoid() {
+        val localVarCollector = object : KtVisitorVoid() {
             override fun visitElement(element: PsiElement) {
                 if (element !is KtLambdaExpression) element.acceptChildren(this)
             }
@@ -806,30 +927,80 @@ class KotlinWalker(
             }
 
             override fun visitParameter(parameter: KtParameter) {
-                if (!parent.valueParameters.contains(parameter)) {
+                if (!ignore.contains(parameter)) {
                     toReturn += parameter
                 }
 
                 super.visitParameter(parameter)
             }
         }
-        parent.accept(localVarCollector)
+        element.accept(localVarCollector)
+
+        return toReturn
+    }
+
+    private fun KtClassInitializer.localVariablesAndParams(): List<PsiElement> {
+        if (getUserData(localVarParams) != null) return getUserData(localVarParams)!!
+
+        val valueParameters = containingClass()?.primaryConstructor?.valueParameters ?: emptyList()
+        val toReturn = mutableListOf<PsiElement>()
+        toReturn.addAll(valueParameters)
+
+        toReturn.addAll(collectLocalVars(this, valueParameters))
 
         putUserData(localVarParams, toReturn)
         return toReturn
     }
 
-    private var handled = false
+    private fun KtBlockExpression.localVariablesAndParams(descriptor: CallableDescriptor): List<PsiElement> {
+        if (getUserData(localVarParams) != null) return getUserData(localVarParams)!!
+
+        val valueParameters = if (parent is KtFunction) (parent as KtFunction).valueParameters else emptyList()
+        val toReturn = mutableListOf<PsiElement>()
+        toReturn.addAll(valueParameters)
+        if (descriptor.valueParameters.isNotEmpty() && toReturn.isEmpty()) {
+            toReturn += LeafPsiElement(KtNameReferenceExpressionElementType("it"), "it")
+        }
+
+        toReturn.addAll(collectLocalVars(parent, valueParameters))
+
+        putUserData(localVarParams, toReturn)
+        return toReturn
+    }
+
+    private fun <T> tryRun(toRun: () -> T): T? {
+        return try {
+            toRun()
+        } catch (throwable: Throwable) {
+            throwable.message?.let { logger.errorLogger.println(it) }
+
+            // trim stacktrace because, oh boy, it's hecking long!
+            val index = throwable.stackTrace.indexOfFirst { it.methodName.contains("tryRun") } + 2
+            val subList = throwable.stackTrace.asList().subList(0, index)
+            throwable.stackTrace = subList.toTypedArray()
+            throwable.printStackTrace(logger.errorLogger)
+            null
+        }
+    }
+
+    private var handled = false // It's development purposes. It's used to print out all unhandled cases
+    // It's probably just going to clog up in production, so better to disable feature later
+
+    data class VariableReferenceArguments(
+        val methodContainer: String,
+        val methodName: String,
+        val methodDescriptor: String,
+        val varIndex: Int
+    ) {
+        init {
+            require(varIndex != -1)
+        }
+    }
 }
 
 // Notes on how original srg2source handles variables:
-// Both Eclipse compiler's and Kotlin compiler's variable declaration is composed of 2 parts:
-// Variable declaration and Name
-// Original srg2source works by saving variable in a map on "Variable declaration"
-// and write it into range map on "Name", by dynamically analyzing what kind of name it is
-// I think I can instead write it into range map on "Variable declaration"?
-// Also, srg2source treats local variable declaration and reference as same thing
-// and static and non-static variable as same thing
+// srg2source treats variable declaration and reference as same thing
+// and static and non-static fields as same thing
 
 // There is a class called StructuralEntry. It adds indent, "# START", and "# END" to output range file.
 // StructureEntry defines what can be StructureEntry, it's things like method, class, etc...
