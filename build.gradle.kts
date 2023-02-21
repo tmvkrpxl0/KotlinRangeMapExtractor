@@ -16,6 +16,8 @@ dependencies {
     testImplementation(kotlin("test"))
     implementation(kotlin("compiler-embeddable"))
     implementation("net.minecraftforge:Srg2Source:8.0.8")
+    implementation("net.minecraftforge:srgutils:0.4.11")
+    implementation("net.sf.jopt-simple:jopt-simple:5.0.4")
 }
 
 tasks.test {
@@ -25,3 +27,4 @@ tasks.test {
 tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "17"
 }
+

@@ -16,8 +16,8 @@ import java.nio.charset.StandardCharsets
 class KotlinRangeExtractor(
     inputs: List<InputSupplier>,
     var output: PrintWriter? = null,
-    val logWarnings: Boolean = false,
-    val fullPower: Boolean = false,
+    private val logWarnings: Boolean = false,
+    private val fullPower: Boolean = false,
     private val jvmVersion: SourceVersion
 ) : ConfLogger<KotlinRangeExtractor>() {
     private val input = if (inputs.size == 1) inputs.first() else ChainedInputSupplier(inputs)
