@@ -1,12 +1,12 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    kotlin("jvm") version "1.7.22"
+    kotlin("jvm") version "1.8.0"
     `maven-publish`
 }
 
 group = "com.tmvkrpxl0"
-version = "1.0"
+version = "1.1"
 
 repositories {
     mavenCentral()
