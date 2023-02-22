@@ -279,32 +279,35 @@ class KotlinWalker(
             val root = descriptor.findSuperRoot() as FunctionDescriptor
             val container = trimTrace {  getContainerInternalName(root) }
 
-            if (descriptor is ConstructorDescriptor) {
-                val reference = expression.getQualifiedElement()
-                val isQualified = (reference as? KtUserType)?.qualifier != null || reference is KtQualifiedExpression
+            when (descriptor) {
+                is ConstructorDescriptor, is SamConstructorDescriptor -> {
+                    val reference = expression.getQualifiedElement()
+                    val isQualified = (reference as? KtUserType)?.qualifier != null || reference is KtQualifiedExpression
+                    val classDescriptor = if (descriptor is ConstructorDescriptor) descriptor.constructedClass else (descriptor as SamConstructorDescriptor).baseDescriptorForSynthetic
 
-                var start = if (isQualified && descriptor.constructedClass.parents.firstOrNull() !is ClassDescriptor) reference.startOffset else expression.startOffset
-                if (expression.containingKtFile.text[start] == '`') start++
-                val end = expression.endOffset
-                val text = expression.containingKtFile.text.substring(start, end).replace("`", "")
-                builder.addClassReference(
-                    start,
-                    text.length,
-                    text,
-                    descriptor.constructedClass.classId!!.internalNameNoJvmRemap,
-                    isQualified
-                )
-            } else {
-                builder.addMethodReference(
-                    unquoted.startOffset,
-                    unquoted.textLength,
-                    unquoted.text,
-                    container,
-                    descriptor.name.asString(),
-                    root.computeJvmDescriptor(withName = false)
-                )
+                    var start = if (isQualified && classDescriptor.parents.firstOrNull() !is ClassDescriptor) reference.startOffset else expression.startOffset
+                    if (expression.containingKtFile.text[start] == '`') start++
+                    val end = expression.endOffset
+                    val text = expression.containingKtFile.text.substring(start, end).replace("`", "")
+                    builder.addClassReference(
+                        start,
+                        text.length,
+                        text,
+                        classDescriptor.classId!!.internalNameNoJvmRemap,
+                        isQualified
+                    )
+                }
+                else -> {
+                    builder.addMethodReference(
+                        unquoted.startOffset,
+                        unquoted.textLength,
+                        unquoted.text,
+                        container,
+                        descriptor.name.asString(),
+                        root.computeJvmDescriptor(withName = false)
+                    )
+                }
             }
-
         }
 
         when (descriptor) {
