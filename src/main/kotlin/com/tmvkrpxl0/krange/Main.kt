@@ -1,5 +1,7 @@
-import Tasks.APPLY
-import Tasks.EXTRACT
+package com.tmvkrpxl0.krange
+
+import com.tmvkrpxl0.krange.Tasks.APPLY
+import com.tmvkrpxl0.krange.Tasks.EXTRACT
 import joptsimple.OptionException
 import joptsimple.OptionParser
 import joptsimple.OptionSpec
@@ -224,7 +226,7 @@ fun Path.output(encoding: Charset = StandardCharsets.UTF_8): OutputSupplier {
 }
 
 fun Path.input(encoding: Charset = StandardCharsets.UTF_8): InputSupplier {
-    require(Files.exists(this)) { "Invalid input value: $this" }
+    require(Files.exists(this)) { "Invalid com.tmvkrpxl0.krange.input value: $this" }
 
     val filename: String = fileName.toString().lowercase()
     try {
@@ -234,8 +236,8 @@ fun Path.input(encoding: Charset = StandardCharsets.UTF_8): InputSupplier {
             return ZipInputSupplier.create(this, encoding)
         }
 
-        throw IllegalArgumentException("Invalid input value: $this")
+        throw IllegalArgumentException("Invalid com.tmvkrpxl0.krange.input value: $this")
     } catch (e: IOException) {
-        throw IllegalArgumentException("Invalid input: $this", e)
+        throw IllegalArgumentException("Invalid com.tmvkrpxl0.krange.input: $this", e)
     }
 }

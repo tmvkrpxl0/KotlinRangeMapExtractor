@@ -1,3 +1,5 @@
+package com.tmvkrpxl0.krange
+
 import net.minecraftforge.srg2source.range.RangeMapBuilder
 import net.minecraftforge.srg2source.util.io.ConfLogger
 import org.jetbrains.kotlin.analyzer.AnalysisResult
@@ -157,7 +159,7 @@ class KotlinWalker(
                         arguments.methodName,
                         arguments.methodDescriptor,
                         arguments.varIndex,
-                        trimTrace { descriptor.type.classId.jvmName } ?: return
+                        trimTrace { descriptor.type.classId.internalNameNoJvmRemap } ?: return
                     )
                 }
 
@@ -250,9 +252,9 @@ class KotlinWalker(
             // Why would anyone name companion object same as class that containing it?
             val isImplicitCompanionReference = descriptor.isCompanionObject && descriptor.name != expression.getReferencedNameAsName()
             val classDescriptor = if (compatibility && isImplicitCompanionReference) {
-                (descriptor.containingDeclaration as ClassDescriptor).classId!!.jvmName
+                (descriptor.containingDeclaration as ClassDescriptor).classId!!.internalNameNoJvmRemap
             } else {
-                descriptor.classId!!.jvmName
+                descriptor.classId!!.internalNameNoJvmRemap
             }
 
             var start = if (isQualified && descriptor.parents.firstOrNull() !is ClassDescriptor) reference.startOffset else expression.startOffset
@@ -289,7 +291,7 @@ class KotlinWalker(
                     start,
                     text.length,
                     text,
-                    descriptor.constructedClass.classId!!.jvmName,
+                    descriptor.constructedClass.classId!!.internalNameNoJvmRemap,
                     isQualified
                 )
             } else {
@@ -353,6 +355,7 @@ class KotlinWalker(
         function.docComment?.accept(this)
         function.modifierList?.accept(this)
         function.typeParameters.visitAll(true)
+        function.receiverTypeReference?.accept(this)
         function.typeReference?.accept(this)
 
         val methodName = unquote(function.nameIdentifier!!)
@@ -399,7 +402,7 @@ class KotlinWalker(
         handled = true
         val enumClass = enumEntry.containingClass()!!
         val name = unquote(enumEntry.nameIdentifier!!)
-        builder.addFieldReference(name.startOffset, name.textLength, name.text, enumClass.getClassId()!!.jvmName)
+        builder.addFieldReference(name.startOffset, name.textLength, name.text, enumClass.getClassId()!!.internalNameNoJvmRemap)
 
         if (enumEntry.body == null) return super.visitEnumEntry(enumEntry)
 
@@ -436,7 +439,7 @@ class KotlinWalker(
         if (klass is KtEnumEntry) return super.visitClassOrObject(klass)
 
         val innerName = if (klass.getClassId() != null) {
-            klass.getClassId()!!.jvmName
+            klass.getClassId()!!.internalNameNoJvmRemap
         } else {
             getContainerInternalName(klass.findClassDescriptor(bindingContext)) + "\$${klass.text.hashCode()}"
         }
@@ -605,13 +608,13 @@ class KotlinWalker(
         val method = variable.parents.first { it is KtFunction || it is KtClassInitializer }
         val varDescriptor = bindingContext[BindingContext.VARIABLE, variable]!!.original as VariableDescriptor
         val varName = unquote(variable.nameIdentifier!!)
-        val type = trimTrace { varDescriptor.type.classId.jvmName } ?: return
+        val type = trimTrace { varDescriptor.type.classId.internalNameNoJvmRemap } ?: return
 
         val (container, name, descriptor, index) = if (method is KtClassInitializer) {
             val result = method.analyze(variable)
 
             VariableReferenceArguments(
-                result.container.classId!!.jvmName,
+                result.container.classId!!.internalNameNoJvmRemap,
                 "<init>",
                 result.descriptor,
                 result.varIndex
@@ -692,7 +695,7 @@ class KotlinWalker(
             initializer.startOffset,
             4,
             "init",
-            container.getClassId()!!.jvmName,
+            container.getClassId()!!.internalNameNoJvmRemap,
             "<init>",
             descriptor
         )
@@ -761,11 +764,15 @@ class KotlinWalker(
         element.acceptChildren(this)
     }
     
-    private val ClassId.jvmName: String
+    private val ClassId.internalNameNoJvmRemap: String
         get() {
             val packageName = packageFqName.joinSlash()
             val classPath = relativeClassName.pathSegments().joinToString("$")
-            return "$packageName/$classPath"
+            return if (packageName.isEmpty()) {
+                classPath
+            } else {
+                "$packageName/$classPath"
+            }
         }
 
     private fun List<PsiElement>.visitAll(allowEmpty: Boolean = false) {
@@ -814,7 +821,7 @@ class KotlinWalker(
     @Suppress("NAME_SHADOWING")
     private fun getContainerInternalName(descriptor: DeclarationDescriptorWithSource): String {
         if (descriptor is SamConstructorDescriptor) {
-            return descriptor.baseDescriptorForSynthetic.classId!!.jvmName
+            return descriptor.baseDescriptorForSynthetic.classId!!.internalNameNoJvmRemap
         }
 
         val descriptor: DeclarationDescriptorWithSource = when (descriptor) {
@@ -837,7 +844,7 @@ class KotlinWalker(
             }
 
             val typeId = container.classId!!
-            return typeId.jvmName
+            return typeId.internalNameNoJvmRemap
         }
 
         if (container is PackageFragmentDescriptor) {
@@ -897,25 +904,15 @@ class KotlinWalker(
 
         if (!isAnonymous) return descriptor.name.asString()
 
-        return when (this) {
-            is KtFunction -> {
-                var lambdaName = parent.getUserData(lambdaName)
-                if (lambdaName == null) {
-                    lambdaName = (parent as KtLambdaExpression).generateJvmName()
-                    parent.putUserData(this@KotlinWalker.lambdaName, lambdaName)
-                }
+        this as KtFunction
 
-                return lambdaName
-            }
-
-            is KtPropertyAccessor -> {
-                namePlaceholder.text
-            }
-
-            else -> {
-                throw RuntimeException("Unknown declaration type $text (${this::class.qualifiedName}")
-            }
+        var lambdaName = parent.getUserData(lambdaName)
+        if (lambdaName == null) {
+            lambdaName = (parent as KtLambdaExpression).generateJvmName()
+            parent.putUserData(this@KotlinWalker.lambdaName, lambdaName)
         }
+
+        return lambdaName
     }
 
     private fun collectLocalVars(element: PsiElement, ignore: List<PsiElement>): List<PsiElement> {

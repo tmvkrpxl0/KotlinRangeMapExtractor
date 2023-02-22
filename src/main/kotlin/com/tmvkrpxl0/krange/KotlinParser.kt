@@ -1,3 +1,5 @@
+package com.tmvkrpxl0.krange
+
 import net.minecraftforge.srg2source.api.SourceVersion
 import net.minecraftforge.srg2source.util.io.ConfLogger
 import org.jetbrains.kotlin.analyzer.AnalysisResult

@@ -1,3 +1,4 @@
+import java.io.Serializable
 
 class BaseClass
 fun BaseClass.a() {
@@ -5,6 +6,18 @@ fun BaseClass.a() {
     ""
     'a'
     "asdf"
+}
+
+fun packagetest.lib.Request?.b() {
+
+}
+
+fun ((Int) -> Unit).c() {
+
+}
+
+fun Function<Int>.d() {
+
 }
 
 var a: Int = 0

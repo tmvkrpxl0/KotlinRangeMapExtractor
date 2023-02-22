@@ -1,5 +1,3 @@
-package com.example.examplemod;
-
 import java.io.Serializable;
 
 public abstract class SuperClass<T> {

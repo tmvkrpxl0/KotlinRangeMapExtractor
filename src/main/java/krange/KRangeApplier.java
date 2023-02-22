@@ -1,4 +1,4 @@
-/*
+package krange;/*
  * Srg2Source
  * Copyright (c) 2020.
  *
@@ -160,7 +160,7 @@ public class KRangeApplier extends RangeApplier {
 
     public void run() throws IOException {
         if (input == null)
-            throw new IllegalStateException("Missing Range Apply input");
+            throw new IllegalStateException("Missing Range Apply com.tmvkrpxl0.krange.input");
         if (output == null)
             throw new IllegalStateException("Missing Range Apply output");
         if (range == null)
