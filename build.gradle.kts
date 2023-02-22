@@ -2,10 +2,11 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     kotlin("jvm") version "1.7.22"
+    `maven-publish`
 }
 
-group = "org.example"
-version = "1.0-SNAPSHOT"
+group = "com.tmvkrpxl0"
+version = "1.0"
 
 repositories {
     mavenCentral()
@@ -28,3 +29,17 @@ tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "17"
 }
 
+publishing {
+    repositories {
+        maven {
+            name = "github"
+            setUrl("./maven")
+        }
+    }
+    publications {
+        create<MavenPublication>("github") {
+            artifactId = rootProject.name
+            from(components["java"])
+        }
+    }
+}

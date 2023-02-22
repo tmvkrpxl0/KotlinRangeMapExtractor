@@ -1,0 +1,110 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.tmvkrpxl0",
+    "module": "krangemap",
+    "version": "1.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "7.3.3"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib-jdk8",
+          "version": {
+            "requires": "1.7.22"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "krangemap-1.0.jar",
+          "url": "krangemap-1.0.jar",
+          "size": 87481,
+          "sha512": "a868e149c47e36f0f94e2f2a23d9871c1925311a755c34d803cb378334c65e7546e100e2392d95ffcf0427fb7b1e3acc631bbdfaa6daf6a4e6cb24d199de4d32",
+          "sha256": "c0ecdfaae5d0a2deb024ad2012545b7c7c9fd094cab2c1217084647a95fd539d",
+          "sha1": "7942aa18ea8c0ffd94fe8250644f19022264e617",
+          "md5": "06ce2911bb55d1f73d38c5d506478267"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-compiler-embeddable",
+          "version": {
+            "requires": "1.7.22"
+          }
+        },
+        {
+          "group": "net.minecraftforge",
+          "module": "Srg2Source",
+          "version": {
+            "requires": "8.0.8"
+          }
+        },
+        {
+          "group": "net.minecraftforge",
+          "module": "srgutils",
+          "version": {
+            "requires": "0.4.11"
+          }
+        },
+        {
+          "group": "net.sf.jopt-simple",
+          "module": "jopt-simple",
+          "version": {
+            "requires": "5.0.4"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib-jdk8",
+          "version": {
+            "requires": "1.7.22"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "krangemap-1.0.jar",
+          "url": "krangemap-1.0.jar",
+          "size": 87481,
+          "sha512": "a868e149c47e36f0f94e2f2a23d9871c1925311a755c34d803cb378334c65e7546e100e2392d95ffcf0427fb7b1e3acc631bbdfaa6daf6a4e6cb24d199de4d32",
+          "sha256": "c0ecdfaae5d0a2deb024ad2012545b7c7c9fd094cab2c1217084647a95fd539d",
+          "sha1": "7942aa18ea8c0ffd94fe8250644f19022264e617",
+          "md5": "06ce2911bb55d1f73d38c5d506478267"
+        }
+      ]
+    }
+  ]
+}
