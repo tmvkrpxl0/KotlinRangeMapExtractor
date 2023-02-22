@@ -30,7 +30,7 @@
           "group": "org.jetbrains.kotlin",
           "module": "kotlin-stdlib-jdk8",
           "version": {
-            "requires": "1.8.0"
+            "requires": "1.7.22"
           }
         }
       ],
@@ -38,11 +38,11 @@
         {
           "name": "krangemap-1.1.jar",
           "url": "krangemap-1.1.jar",
-          "size": 87919,
-          "sha512": "9bb8900c23a8ce1d773363350d3acca52cd46d9d756883de9603855a662a5144267ca86282784466684a66a9c1d690ee2e1b5a883000bcd8a3c924e62209ac7a",
-          "sha256": "f858a958e392be829fb7e40f175568468b81941b0ecd1f99807f7529e5548454",
-          "sha1": "d9eeec3093e10f91105b8bcb0b0f3d8645767116",
-          "md5": "43ba8140cc569c4708166f5a41e3511f"
+          "size": 87483,
+          "sha512": "ec8706f33115a4f91733267f91aefb4f7f204edf238d82e02fe57a123be0f8ddeb7d796222e613f91c45046cb1ac1ea22e10bb90a003cf42c823a774ad7ed94c",
+          "sha256": "d4d6a885d45b88819512d79253b9e1cbdd1338ddf32863599c4e9b75ca4b1da1",
+          "sha1": "5edb8ab1781c2e0ce7a3229e55e26daf8c932173",
+          "md5": "a424a88d8a6484bc1ef34797a02b4aed"
         }
       ]
     },
@@ -62,7 +62,7 @@
           "group": "org.jetbrains.kotlin",
           "module": "kotlin-compiler-embeddable",
           "version": {
-            "requires": "1.8.0"
+            "requires": "1.7.22"
           }
         },
         {
@@ -90,7 +90,7 @@
           "group": "org.jetbrains.kotlin",
           "module": "kotlin-stdlib-jdk8",
           "version": {
-            "requires": "1.8.0"
+            "requires": "1.7.22"
           }
         }
       ],
@@ -98,11 +98,11 @@
         {
           "name": "krangemap-1.1.jar",
           "url": "krangemap-1.1.jar",
-          "size": 87919,
-          "sha512": "9bb8900c23a8ce1d773363350d3acca52cd46d9d756883de9603855a662a5144267ca86282784466684a66a9c1d690ee2e1b5a883000bcd8a3c924e62209ac7a",
-          "sha256": "f858a958e392be829fb7e40f175568468b81941b0ecd1f99807f7529e5548454",
-          "sha1": "d9eeec3093e10f91105b8bcb0b0f3d8645767116",
-          "md5": "43ba8140cc569c4708166f5a41e3511f"
+          "size": 87483,
+          "sha512": "ec8706f33115a4f91733267f91aefb4f7f204edf238d82e02fe57a123be0f8ddeb7d796222e613f91c45046cb1ac1ea22e10bb90a003cf42c823a774ad7ed94c",
+          "sha256": "d4d6a885d45b88819512d79253b9e1cbdd1338ddf32863599c4e9b75ca4b1da1",
+          "sha1": "5edb8ab1781c2e0ce7a3229e55e26daf8c932173",
+          "md5": "a424a88d8a6484bc1ef34797a02b4aed"
         }
       ]
     }
