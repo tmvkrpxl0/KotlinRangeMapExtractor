@@ -287,7 +287,7 @@ public class KRangeApplier extends RangeApplier {
                 case METHOD: {
                     MethodReference ref = (MethodReference)info;
                     String mapped = mapMethod(ref.getOwner(), ref.getName(), ref.getDescriptor());
-                    if (!ref.getText().equals(ref.getName()) && toSyntheticFieldRef(ref.getName()).equals(ref.getName())) {
+                    if (!ref.getText().equals(ref.getName()) && toSyntheticFieldRef(ref.getName()).equals(ref.getText())) {
                         mapped = toSyntheticFieldRef(mapped);
                     }
                     newName = mapped;
