@@ -23,7 +23,7 @@ buildscript {
         classpath(group = "net.neoforged", name = "NeoGradle", version = "6.+")
         classpath("net.minecraftforge:srgutils:0.4.13")
         classpath("commons-io:commons-io:2.8.0")
-        classpath("com.tmvkrpxl0:krangemap:1.3")
+        classpath("com.tmvkrpxl0:krangemap:1.+")
     }
 }
 
