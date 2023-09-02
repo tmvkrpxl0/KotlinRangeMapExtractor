@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.tmvkrpxl0",
+    "module": "krangemap",
+    "version": "1.5",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "7.3.3"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib-jdk8",
+          "version": {
+            "requires": "1.8.0"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "krangemap-1.5.jar",
+          "url": "krangemap-1.5.jar",
+          "size": 90051,
+          "sha512": "75a3c27b09db6c4b08709dff6f8d21c824662b4235f5bc8cb6d0de672cb06b2c3701be46b924801a9747ee4641973b280fa6d8625729ff2a633e1c2bd197473c",
+          "sha256": "94d75f6164a70cca3e08a101d169cf860ab52a205fa75d7bc6a0032fd1a3874c",
+          "sha1": "9177193b132d532084e233e5f737069e29ceffa7",
+          "md5": "7c6cd39e8f85edc476e71e49f135061c"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-compiler-embeddable",
+          "version": {
+            "requires": "1.8.0"
+          }
+        },
+        {
+          "group": "net.minecraftforge",
+          "module": "Srg2Source",
+          "version": {
+            "requires": "8.0.8"
+          }
+        },
+        {
+          "group": "net.minecraftforge",
+          "module": "srgutils",
+          "version": {
+            "requires": "0.5.3"
+          }
+        },
+        {
+          "group": "net.sf.jopt-simple",
+          "module": "jopt-simple",
+          "version": {
+            "requires": "5.0.4"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib-jdk8",
+          "version": {
+            "requires": "1.8.0"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "krangemap-1.5.jar",
+          "url": "krangemap-1.5.jar",
+          "size": 90051,
+          "sha512": "75a3c27b09db6c4b08709dff6f8d21c824662b4235f5bc8cb6d0de672cb06b2c3701be46b924801a9747ee4641973b280fa6d8625729ff2a633e1c2bd197473c",
+          "sha256": "94d75f6164a70cca3e08a101d169cf860ab52a205fa75d7bc6a0032fd1a3874c",
+          "sha1": "9177193b132d532084e233e5f737069e29ceffa7",
+          "md5": "7c6cd39e8f85edc476e71e49f135061c"
+        }
+      ]
+    },
+    {
+      "name": "shadowRuntimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "shadowed",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "krangemap-1.5-fatJar.jar",
+          "url": "krangemap-1.5-fatJar.jar",
+          "size": 74520016,
+          "sha512": "bb010ab0a019b6cb1b6474018804662fd29a763654bbfb60d5f85cd4dd9c38484500dbcd80c96fafafa2d059f7bc5f579e1a0e25b072d50045a4ac0fa0de11dd",
+          "sha256": "46ccc8254b6f1feeec568c84043ccb8d73f92680e4451019a8599b48d8f1e015",
+          "sha1": "e48fa0bf7bb4f1c6f31c5cd7ea61dfddc1af3e28",
+          "md5": "7716bee6051248c18efa791cd503cd44"
+        }
+      ]
+    }
+  ]
+}

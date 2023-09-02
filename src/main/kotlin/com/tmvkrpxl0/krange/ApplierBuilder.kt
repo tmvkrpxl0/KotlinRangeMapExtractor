@@ -1,6 +1,5 @@
 package com.tmvkrpxl0.krange
 
-import krange.KRangeApplier
 import net.minecraftforge.srg2source.api.InputSupplier
 import net.minecraftforge.srg2source.api.OutputSupplier
 import net.minecraftforge.srg2source.util.io.ChainedInputSupplier
