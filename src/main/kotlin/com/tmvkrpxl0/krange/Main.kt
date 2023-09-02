@@ -229,7 +229,7 @@ fun Path.output(encoding: Charset = StandardCharsets.UTF_8): OutputSupplier {
 }
 
 fun Path.input(encoding: Charset = StandardCharsets.UTF_8): InputSupplier {
-    require(Files.exists(this)) { "Invalid com.tmvkrpxl0.krange.input value: $this" }
+    require(Files.exists(this)) { "Invalid input value: $this" }
 
     val filename: String = fileName.toString().lowercase()
     try {
@@ -239,8 +239,8 @@ fun Path.input(encoding: Charset = StandardCharsets.UTF_8): InputSupplier {
             return ZipInputSupplier.create(this, encoding)
         }
 
-        throw IllegalArgumentException("Invalid com.tmvkrpxl0.krange.input value: $this")
+        throw IllegalArgumentException("Invalid input value: $this")
     } catch (e: IOException) {
-        throw IllegalArgumentException("Invalid com.tmvkrpxl0.krange.input: $this", e)
+        throw IllegalArgumentException("Invalid input: $this", e)
     }
 }

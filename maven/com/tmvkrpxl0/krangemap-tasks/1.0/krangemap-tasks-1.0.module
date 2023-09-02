@@ -69,14 +69,14 @@
           "group": "net.minecraftforge",
           "module": "srgutils",
           "version": {
-            "requires": "0.4.13"
+            "requires": "0.5.3"
           }
         },
         {
           "group": "commons-io",
           "module": "commons-io",
           "version": {
-            "requires": "2.8.0"
+            "requires": "2.11.0"
           }
         },
         {

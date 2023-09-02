@@ -19,7 +19,7 @@ dependencies {
     testImplementation(kotlin("test"))
     implementation(kotlin("compiler-embeddable"))
     implementation("net.minecraftforge:Srg2Source:8.0.8")
-    implementation("net.minecraftforge:srgutils:0.4.11")
+    implementation("net.minecraftforge:srgutils:0.5.3")
     implementation("net.sf.jopt-simple:jopt-simple:5.0.4")
 }
 
@@ -28,10 +28,6 @@ tasks {
         manifest {
             attributes("Main-Class" to "com.tmvkrpxl0.krange.MainKt")
         }
-    }
-
-    test {
-        useJUnitPlatform()
     }
 
     withType<KotlinCompile> {

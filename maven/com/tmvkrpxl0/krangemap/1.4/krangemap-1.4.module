@@ -38,11 +38,11 @@
         {
           "name": "krangemap-1.4.jar",
           "url": "krangemap-1.4.jar",
-          "size": 90263,
-          "sha512": "eb178c1bf80ed82d6b576e539a1fa373065731ba2c1b89a35c62f76080ffc7635968e169a199386ea8fb5dc342a2b00d1260a56e497944e45b9275dc68e6b555",
-          "sha256": "80f9e772ac360fa5ae42cc5a87a602855989672d78c3bd518d51597bc9383892",
-          "sha1": "944a747202a2df16819ba8cad7d954898c63c985",
-          "md5": "65d35f41b94bfd279c16a7e497f47f5b"
+          "size": 90252,
+          "sha512": "6b082d6f732502677e2a25136acf5293b1968864d5e1c740ad94d4ed0307180eb97bef5b41c0584ab6f0815e8d22135282d515cbfb3d4a6986bb921f4f1ca9a3",
+          "sha256": "818179a2e38182a825223ba12d413da4a0496fabdff9436cb39a5c9ed5727b34",
+          "sha1": "214dbaa8ae8f6562e08d99d7f3e2cc1defcb7a9c",
+          "md5": "b0ffaa8c66f8fc622e8c12affb983f6b"
         }
       ]
     },
@@ -76,7 +76,7 @@
           "group": "net.minecraftforge",
           "module": "srgutils",
           "version": {
-            "requires": "0.4.11"
+            "requires": "0.5.3"
           }
         },
         {
@@ -98,11 +98,11 @@
         {
           "name": "krangemap-1.4.jar",
           "url": "krangemap-1.4.jar",
-          "size": 90263,
-          "sha512": "eb178c1bf80ed82d6b576e539a1fa373065731ba2c1b89a35c62f76080ffc7635968e169a199386ea8fb5dc342a2b00d1260a56e497944e45b9275dc68e6b555",
-          "sha256": "80f9e772ac360fa5ae42cc5a87a602855989672d78c3bd518d51597bc9383892",
-          "sha1": "944a747202a2df16819ba8cad7d954898c63c985",
-          "md5": "65d35f41b94bfd279c16a7e497f47f5b"
+          "size": 90252,
+          "sha512": "6b082d6f732502677e2a25136acf5293b1968864d5e1c740ad94d4ed0307180eb97bef5b41c0584ab6f0815e8d22135282d515cbfb3d4a6986bb921f4f1ca9a3",
+          "sha256": "818179a2e38182a825223ba12d413da4a0496fabdff9436cb39a5c9ed5727b34",
+          "sha1": "214dbaa8ae8f6562e08d99d7f3e2cc1defcb7a9c",
+          "md5": "b0ffaa8c66f8fc622e8c12affb983f6b"
         }
       ]
     },
@@ -118,11 +118,11 @@
         {
           "name": "krangemap-1.4-fatJar.jar",
           "url": "krangemap-1.4-fatJar.jar",
-          "size": 74517461,
-          "sha512": "b34cf31a038e41546f5585d74a603b759a77ee235ccc3ee753ddf7e10b8a65ffabb308ba4082627ac71410731ea56f4de6dbec0d1e772bf2a81c548f491e5153",
-          "sha256": "cff4442b43cb9f988db3144306ab6dec51e20b7a8f4fc69d458dc8f6e79ba23a",
-          "sha1": "8a07e04c6c7467d9454dd20383d1132ff31a6594",
-          "md5": "425638f338e56367613102cf46d9adcf"
+          "size": 74520217,
+          "sha512": "f39beed4545d58bb4963191da913d15d45be2f516d4ea3f0e53a93df0e336d333f7f574d8403a2fd12f4358ac913e9bbb12aaaf1ff48dcf8731b8af634a7cbc5",
+          "sha256": "8987d7b73fda933efe65cfda841821f9312c2929dd201abe8493128057f51a69",
+          "sha1": "057717d519ecda67cd7bc68380294defe13f7814",
+          "md5": "ae170910459ee3d05f21e309c80a8474"
         }
       ]
     }

@@ -37,15 +37,15 @@ updateSrgs?.let { urls ->
             }
 
         val sourceDirs = sourceSets.map { sourceSet ->
-            sourceSet.java.srcDirs
-        }
+            (sourceSet.extensions.findByName("kotlin") as? SourceDirectorySet)?.srcDirs
+        }.filterNotNull()
 
         if (sourceDirs.isEmpty()) {
-            throw RuntimeException("No java source directories found to update!")
+            throw RuntimeException("No kotlin source directories found to update!")
         }
 
         task<DownloadSrgFiles>("downloadSrgFiles") {
-            input.set(updateSrgs)
+            input.set(urls)
             reversed.set(isReversed)
         }
 

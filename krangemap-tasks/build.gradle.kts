@@ -15,8 +15,8 @@ repositories {
 
 dependencies {
     implementation(group = "net.neoforged", name = "NeoGradle", version = "6.+")
-    implementation("net.minecraftforge:srgutils:0.4.13")
-    implementation("commons-io:commons-io:2.8.0")
+    implementation("net.minecraftforge:srgutils:0.5.3")
+    implementation("commons-io:commons-io:2.11.0")
     implementation(gradleApi())
 }
 
