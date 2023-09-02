@@ -1,5 +1,7 @@
 buildscript {
     repositories {
+        maven(url = "https://maven.minecraftforge.net")
+        maven(url = "https://maven.neoforged.net")
         maven(url = "https://raw.githubusercontent.com/tmvkrpxl0/KotlinRangeMapExtractor/main/maven")
         mavenCentral()
     }
