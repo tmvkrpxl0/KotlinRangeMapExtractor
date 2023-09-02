@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.tmvkrpxl0"
-version = "1.4"
+version = project.property("version")!! as String
 
 repositories {
     mavenCentral()

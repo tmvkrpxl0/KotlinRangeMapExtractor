@@ -1,0 +1,103 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.tmvkrpxl0",
+    "module": "krangemap-tasks",
+    "version": "1.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "7.3.3"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib-jdk8",
+          "version": {
+            "requires": "1.8.0"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "krangemap-tasks-1.0.jar",
+          "url": "krangemap-tasks-1.0.jar",
+          "size": 9129,
+          "sha512": "72517abdcb6fef8e08be80c23f7d9f15b887355495823c28c90cd54653f1b6f8f4e555c3fec64c34d2e1b8bdad05f768ed65395960c6ebc61794583ae71ba32f",
+          "sha256": "523272e673514e3adfec8088860e5f6435fb4983595adf04fa78b948ff582cd2",
+          "sha1": "d11b68005c3d3e831b382f6fd371dbf655f2e5f9",
+          "md5": "40643b78fcea73db879f4a7733436212"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "net.neoforged",
+          "module": "NeoGradle",
+          "version": {
+            "requires": "6.+"
+          }
+        },
+        {
+          "group": "net.minecraftforge",
+          "module": "srgutils",
+          "version": {
+            "requires": "0.4.13"
+          }
+        },
+        {
+          "group": "commons-io",
+          "module": "commons-io",
+          "version": {
+            "requires": "2.8.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib-jdk8",
+          "version": {
+            "requires": "1.8.0"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "krangemap-tasks-1.0.jar",
+          "url": "krangemap-tasks-1.0.jar",
+          "size": 9129,
+          "sha512": "72517abdcb6fef8e08be80c23f7d9f15b887355495823c28c90cd54653f1b6f8f4e555c3fec64c34d2e1b8bdad05f768ed65395960c6ebc61794583ae71ba32f",
+          "sha256": "523272e673514e3adfec8088860e5f6435fb4983595adf04fa78b948ff582cd2",
+          "sha1": "d11b68005c3d3e831b382f6fd371dbf655f2e5f9",
+          "md5": "40643b78fcea73db879f4a7733436212"
+        }
+      ]
+    }
+  ]
+}
