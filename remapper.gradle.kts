@@ -1,3 +1,8 @@
+import com.tmvkrpxl0.krange.tasks.DownloadSrgFiles
+import com.tmvkrpxl0.krange.tasks.ExtractKRangeMap
+import com.tmvkrpxl0.krange.tasks.ApplyKRangeMap
+import net.minecraftforge.gradle.common.tasks.ExtractExistingFiles
+
 buildscript {
     repositories {
         maven(url = "https://maven.minecraftforge.net")
@@ -7,8 +12,16 @@ buildscript {
     }
 
     dependencies {
-        classpath("com.tmvkrpxl0:krangemap:1.+:tasks")
+        classpath("com.tmvkrpxl0:krangemap-tasks:1.+")
+        classpath(group = "net.neoforged", name = "NeoGradle", version = "6.+")
     }
+}
+
+repositories {
+    maven(url = "https://maven.minecraftforge.net")
+    maven(url = "https://maven.neoforged.net")
+    maven(url = "https://raw.githubusercontent.com/tmvkrpxl0/KotlinRangeMapExtractor/main/maven")
+    mavenCentral()
 }
 
 val updateSrgs = (findProperty("UPDATE_SRGS") as? String)?.split(";")
@@ -41,15 +54,14 @@ updateSrgs?.let { urls ->
             dependencies.from(sourceSets.map { it.compileClasspath })
         }
 
-        task<ApplyRangeMap>("applyRangeMapNew") {
-            println(tasks["extractRangeMapNew"].javaClass)
+        task<ApplyKRangeMap>("applyRangeMapNew") {
             rangeMap.set((tasks["extractRangeMapNew"] as ExtractKRangeMap).output)
             srgFiles.from((tasks["downloadSrgFiles"] as DownloadSrgFiles).output.asFileTree)
             sources.from(sourceDirs)
         }
 
         task<ExtractExistingFiles>("extractMappedNew") {
-            archive.set((tasks["applyRangeMapNew"] as ApplyRangeMap).output)
+            archive.set((tasks["applyRangeMapNew"] as ApplyKRangeMap).output)
             targets.from(sourceDirs)
         }
 

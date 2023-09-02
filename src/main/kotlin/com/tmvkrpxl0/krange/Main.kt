@@ -175,6 +175,9 @@ private enum class Tasks {
                 .ofType(Boolean::class.java)
                 .defaultsTo(false)
 
+            // unused
+            parser.accepts("batch").withOptionalArg().ofType(Boolean::class.java).defaultsTo(true)
+
             try {
                 val options = parser.parse(*args)
                 println("Compat: " + options.valueOf(jvmVersionArg))
