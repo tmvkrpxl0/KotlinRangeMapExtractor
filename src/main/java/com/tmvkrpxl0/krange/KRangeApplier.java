@@ -497,7 +497,7 @@ public class KRangeApplier extends RangeApplier {
                     CharSequence sub = data.subSequence(lastIndex, data.length()); // grab the rest of the string.
                     data.setLength(lastIndex); // cut off the build there
 
-                    newImports.stream().sorted().forEach(imp -> data.append("import ").append(imp).append(";\n"));
+                    newImports.stream().sorted().forEach(imp -> data.append("import ").append(imp).append("\n"));
 
                     if (newImports.size() > 0)
                         data.append(newline);
@@ -530,7 +530,7 @@ public class KRangeApplier extends RangeApplier {
                 CharSequence sub = data.subSequence(index, data.length()); // grab the rest of the string.
                 data.setLength(index); // cut off the build there
 
-                newImports.stream().sorted().forEach(imp -> data.append(newline).append("import ").append(imp).append(";"));
+                newImports.stream().sorted().forEach(imp -> data.append(newline).append("import ").append(imp));
 
                 if (newImports.size() > 0)
                     data.append('\n');
@@ -569,7 +569,7 @@ public class KRangeApplier extends RangeApplier {
                         return new String[] { i.substring(0, idx), i.substring(idx + 1) };
                     })
                     .sorted((o1, o2) -> o1[0].equals(o2[0]) ? o1[1].compareTo(o2[1]) : o1[0].compareTo(o2[0]))
-                    .map(i -> "import " + i[0] + '.' + i[1] + ';')
+                    .map(i -> "import " + i[0] + '.' + i[1])
                     .collect(Collectors.joining(newline));
                 data.replace(startIndex, endIndex, imports);
             }
