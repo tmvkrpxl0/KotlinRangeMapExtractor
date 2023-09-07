@@ -6,7 +6,7 @@ For porting, Minecraft, CraftBukkit, mods, plugins, etc.
 
 ## Usage
 
-If you want to use execute jar file directoy:
+If you want to use execute jar file directly:
 ```sh
 java -jar krangemap-1.5-fatJar.jar --extract [SourceDir] [LibrariesDir] [RangeMapOutput]
 java -jar krangemap-1.5-fatJar.jar --apply --srcRoot [SourceDir] --srcRangeMap [RangeMap] --srgFiles [SRGFile] --excFiles [ExcFile] --outDir [Output]
